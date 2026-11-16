@@ -1,0 +1,19 @@
+# только для локальных тестов (npm run dev:test): без привязки ai, ai заменён заглушкой
+name = "tasqly"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+# статика (pwa) отдаётся напрямую, воркер запускается только для /api/*
+[assets]
+directory = "./public"
+run_worker_first = ["/api/*"]
+
+# сайты, которым разрешено ходить в api (через запятую)
+[vars]
+AI_MOCK = "1"
+ALLOWED_ORIGINS = "https://gdev49df.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tasqly"
+database_id = "662c5b62-87e0-4ddd-80d0-bc426cad032b"

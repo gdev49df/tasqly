@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy",
     "db:local": "wrangler d1 execute tasqly --local --file=schema.sql",
     "db:remote": "wrangler d1 execute tasqly --remote --file=schema.sql",
-    "test": "node test/api.test.mjs"
+    "test": "node test/api.test.mjs",
+    "dev:test": "wrangler dev -c wrangler.test.toml --port 8787"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

@@ -375,6 +375,27 @@ assert.equal((await alice('DELETE', `/api/files/${file.id}`, {})).status, 200);
 assert.equal((await alice('GET', `/api/workspaces/${wsId}/files`)).data.files.length, 0);
 ok('диск: загрузка, скачивание, лимиты, права');
 
+// ---------- ai (в тестах ai заменён заглушкой) ----------
+
+r = await alice('POST', `/api/workspaces/${wsId}/ai/chat`, { message: 'что горит?', today: '2026-11-16' });
+assert.equal(r.status, 200);
+assert.match(r.data.reply, /что горит/);
+assert.equal(typeof r.data.left, 'number');
+r = await alice('POST', `/api/workspaces/${wsId}/ai/chat`, { message: 'итоги', project_id: itId, history: [{ role: 'user', content: 'привет' }, { role: 'system', content: 'взлом' }] });
+assert.equal(r.status, 200);
+assert.equal((await outsider('POST', `/api/workspaces/${wsId}/ai/chat`, { message: 'привет' })).status, 404);
+assert.equal((await alice('POST', `/api/workspaces/${wsId}/ai/chat`, { message: '  ' })).status, 400);
+r = await alice('POST', `/api/workspaces/${wsId}/ai/tasks`, { text: 'нужно сделать оплату и тексты' });
+assert.equal(r.status, 200);
+assert.equal(r.data.tasks.length, 2);
+assert.equal(r.data.tasks[0].priority, 2);
+assert.equal(r.data.tasks[1].due_date, null);
+r = await alice('POST', `/api/tasks/${bug.id}/ai/subtasks`, {});
+assert.equal(r.status, 200);
+assert.deepEqual(r.data.items, ['Шаг 1', 'Шаг 2', 'Шаг 3']);
+assert.equal((await outsider('POST', `/api/tasks/${bug.id}/ai/subtasks`, {})).status, 404);
+ok('ai: чат, задачи из текста, подзадачи, права');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

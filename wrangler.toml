@@ -15,3 +15,7 @@ ALLOWED_ORIGINS = "https://gdev49df.github.io"
 binding = "DB"
 database_name = "tasqly"
 database_id = "662c5b62-87e0-4ddd-80d0-bc426cad032b"
+
+# ai tasqly: cloudflare workers ai (ключ не нужен)
+[ai]
+binding = "AI"

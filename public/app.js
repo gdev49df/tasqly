@@ -592,6 +592,7 @@
     ['time', 'Время'],
     ['chat', 'Чат'],
     ['files', 'Диск'],
+    ['ai', 'AI'],
   ];
 
   async function viewWorkspace(id, tab = 'projects') {
@@ -599,7 +600,7 @@
     const data = await api.get(`/api/workspaces/${id}`);
     const { workspace } = data;
     document.title = `${workspace.name} · tasqly`;
-    const panel = { projects: panelProjects, notes: panelNotes, time: panelTime, chat: panelChat, files: panelFiles }[tab](id, data);
+    const panel = { projects: panelProjects, notes: panelNotes, time: panelTime, chat: panelChat, files: panelFiles, ai: panelAI }[tab](id, data);
 
     render(
       topbar([{ label: 'Пространства', href: '#/' }, { label: workspace.name }]),
@@ -888,6 +889,130 @@
       if (prevCleanup) prevCleanup();
     };
     return h('div', { class: 'chat' }, list, h('div', { class: 'chat-input' }, input, h('button', { class: 'btn', onclick: send }, 'Отправить')));
+  }
+
+  // ---------- ai tasqly ----------
+
+  function panelAI(id, { projects }) {
+    const history = [];
+    let projectId = '';
+    const list = h('div', { class: 'chat-list' });
+    const note = h('div', { class: 'ai-left' });
+    const todayStr = () => isoOf(new Date());
+
+    const bubble = (role, content) => {
+      const el = h('div', { class: `msg${role === 'user' ? ' mine' : ''}` }, role === 'user' ? null : h('span', { class: 'avatar ai-avatar' }, 'AI'), h('div', { class: 'bubble' }, h('div', { class: 'text' }, content)));
+      list.append(el);
+      list.scrollTop = list.scrollHeight;
+      return el;
+    };
+    const hello = () =>
+      list.replaceChildren(h('div', { class: 'ai-hello' }, h('b', null, 'AI tasqly'), h('span', null, 'Спроси про проекты и задачи пространства: итоги, что горит, план на день. Могу превратить текст в задачи и разбить задачу на подзадачи в её окне.')));
+    hello();
+
+    let busy = false;
+    async function ask(text) {
+      text = text.trim();
+      if (!text || busy) return;
+      busy = true;
+      if (list.querySelector('.ai-hello')) list.replaceChildren();
+      bubble('user', text);
+      const wait = bubble('assistant', 'Думаю…');
+      wait.classList.add('pending');
+      try {
+        const r = await api.post(`/api/workspaces/${id}/ai/chat`, { message: text, today: todayStr(), history, project_id: projectId || undefined });
+        history.push({ role: 'user', content: text }, { role: 'assistant', content: r.reply });
+        wait.querySelector('.text').textContent = r.reply;
+        wait.classList.remove('pending');
+        note.textContent = `Осталось запросов сегодня: ${r.left}`;
+      } catch (e) {
+        wait.querySelector('.text').textContent = e.message;
+        wait.classList.remove('pending');
+        wait.classList.add('failed');
+      } finally {
+        busy = false;
+        list.scrollTop = list.scrollHeight;
+      }
+    }
+
+    const projSel = h('select', { 'aria-label': 'Проект', onchange: () => (projectId = projSel.value) }, h('option', { value: '' }, 'Все проекты'), projects.map((p) => h('option', { value: p.id }, p.name)));
+    const chips = [
+      ['Итоги по проекту', 'Сделай краткие итоги: что сделано, что в работе, что отстаёт.'],
+      ['Что горит', 'Какие задачи просрочены или горят в ближайшие дни? Перечисли с исполнителями.'],
+      ['План на сегодня', 'Составь для меня план на сегодня по приоритетам и срокам.'],
+      ['Кто перегружен', 'Как распределена нагрузка между участниками? Есть ли перекосы?'],
+    ];
+    const input = h('textarea', { rows: 1, placeholder: 'Спроси про задачи (Enter отправляет)', maxlength: 1500, 'aria-label': 'Запрос к AI' });
+    const send = () => {
+      const v = input.value;
+      input.value = '';
+      ask(v);
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    // задачи из текста
+    const textArea = h('textarea', { rows: 5, placeholder: 'Вставь заметки со встречи, переписку или список дел, а AI предложит задачи', maxlength: 4000 });
+    const proposals = h('div', { class: 'ai-props' });
+    const targetSel = h('select', { 'aria-label': 'В какой проект' }, projects.map((p) => h('option', { value: p.id }, p.name)));
+    const extractBtn = h('button', { class: 'btn small' }, 'Предложить задачи');
+    extractBtn.addEventListener('click', async () => {
+      const text = textArea.value.trim();
+      if (!text) return toast('Вставь текст');
+      if (!projects.length) return toast('Сначала создай проект');
+      extractBtn.disabled = true;
+      extractBtn.textContent = 'Думаю…';
+      try {
+        const r = await api.post(`/api/workspaces/${id}/ai/tasks`, { text, today: todayStr() });
+        note.textContent = `Осталось запросов сегодня: ${r.left}`;
+        showProposals(r.tasks);
+      } catch (e) {
+        toast(e.message);
+      } finally {
+        extractBtn.disabled = false;
+        extractBtn.textContent = 'Предложить задачи';
+      }
+    });
+    function showProposals(tasks) {
+      const rows = tasks.map((t) => {
+        const cb = h('input', { type: 'checkbox', checked: true });
+        return { t, cb, el: h('label', { class: 'prop' }, cb, h('span', { class: 'grow' }, t.title), t.priority ? h('span', { class: `prio p${t.priority}` }, h('i'), h('i'), h('i')) : null, t.due_date ? h('span', { class: 'mail-sub' }, formatDate(t.due_date)) : null) };
+      });
+      const create = h('button', { class: 'btn small' }, 'Создать выбранные');
+      create.addEventListener('click', async () => {
+        const chosen = rows.filter((r) => r.cb.checked);
+        if (!chosen.length) return toast('Ничего не выбрано');
+        create.disabled = true;
+        let made = 0;
+        for (const { t } of chosen) {
+          try {
+            await api.post(`/api/projects/${targetSel.value}/tasks`, { title: t.title, priority: t.priority, ...(t.due_date ? { due_date: t.due_date } : {}) });
+            made++;
+          } catch (e) {
+            toast(e.message);
+          }
+        }
+        toast(`Создано задач: ${made}`);
+        proposals.replaceChildren(h('div', { class: 'drawer-note' }, `Создано задач: ${made}. Они лежат в первой колонке проекта.`));
+      });
+      proposals.replaceChildren(h('div', { class: 'card flush' }, rows.map((r) => r.el)), h('div', { class: 'row', style: 'margin-top:10px' }, h('span', { class: 'mail-sub' }, 'В проект:'), targetSel, create));
+    }
+
+    return h(
+      'div',
+      { class: 'ai-wrap' },
+      h(
+        'div',
+        { class: 'ai-main' },
+        h('div', { class: 'ai-bar' }, h('span', { class: 'mail-sub' }, 'Контекст:'), projSel, h('span', { class: 'grow' }), note),
+        h('div', { class: 'chat' }, list, h('div', { class: 'chips' }, chips.map(([label, q]) => h('button', { class: 'chip-btn', onclick: () => ask(q) }, label))), h('div', { class: 'chat-input' }, input, h('button', { class: 'btn', onclick: send }, 'Спросить'))),
+      ),
+      h('aside', { class: 'ai-side' }, h('div', { class: 'card' }, h('h2', null, 'Задачи из текста'), textArea, h('div', { style: 'margin-top:8px' }, extractBtn), proposals)),
+    );
   }
 
   // ---------- диск ----------
@@ -1526,6 +1651,42 @@
             : null,
         );
       }
+      const aiBtn = h('button', { class: 'btn ghost small', title: 'AI предложит шаги, а ты подтвердишь' }, '✦ Разбить с AI');
+      const aiBox = h('div', { class: 'ai-props' });
+      aiBtn.addEventListener('click', async () => {
+        aiBtn.disabled = true;
+        aiBtn.textContent = 'Думаю…';
+        try {
+          const r = await api.post(`/api/tasks/${task.id}/ai/subtasks`, {});
+          const rows = r.items.map((text) => {
+            const cb = h('input', { type: 'checkbox', checked: true });
+            return { text, cb, el: h('label', { class: 'prop' }, cb, h('span', { class: 'grow' }, text)) };
+          });
+          const add = h('button', { class: 'btn small' }, 'Добавить выбранные');
+          add.addEventListener('click', async () => {
+            add.disabled = true;
+            for (const row of rows.filter((x) => x.cb.checked)) {
+              try {
+                const { item } = await api.post(`/api/tasks/${task.id}/checklist`, { text: row.text });
+                items.push(item);
+              } catch (e) {
+                toast(e.message);
+              }
+            }
+            paintChecklist();
+            task.check_total = items.length;
+            task.check_done = items.filter((i) => i.done).length;
+            paint();
+            aiBox.replaceChildren();
+          });
+          aiBox.replaceChildren(h('div', { class: 'card flush' }, rows.map((x) => x.el)), h('div', { style: 'margin-top:8px' }, add));
+        } catch (e) {
+          toast(e.message);
+        } finally {
+          aiBtn.disabled = false;
+          aiBtn.textContent = '✦ Разбить с AI';
+        }
+      });
       const onTimer = () => paintTime();
       window.addEventListener('tq-timer', onTimer);
 
@@ -1751,7 +1912,7 @@
           kind !== 'basic' ? h('div', { class: 'two' }, kind === 'it' ? h('div', null, h('label', { class: 'field' }, 'Тип задачи'), typeSel) : h('div'), h('div', null, h('label', { class: 'field' }, 'Оценка, часов'), estimate)) : null,
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Время'), timeBox),
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Метки'), labelBox, h('div', { class: 'new-label' }, newName, swatches, h('button', { class: 'btn ghost small', onclick: createLabel }, 'Добавить'))),
-          h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Подзадачи'), checkBox),
+          h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Подзадачи'), checkBox, h('div', { style: 'margin-top:8px' }, aiBtn), aiBox),
           saved,
           h('div', { class: 'comments' }, h('h2', null, 'Комментарии'), commentsBox, commentInput, h('div', { class: 'modal-actions' }, h('button', { class: 'btn danger small', onclick: remove }, 'Удалить задачу'), h('button', { class: 'btn small', onclick: sendComment }, 'Отправить'))),
         ),

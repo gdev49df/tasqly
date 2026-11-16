@@ -157,3 +157,11 @@ CREATE TABLE IF NOT EXISTS file_blobs (
   file_id TEXT PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
   data TEXT NOT NULL
 );
+
+-- суточный лимит запросов к ai
+CREATE TABLE IF NOT EXISTS ai_usage (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, day)
+);
