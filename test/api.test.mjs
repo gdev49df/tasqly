@@ -62,6 +62,38 @@ r = await again('POST', '/api/auth/login', { email: `alice${run}@test.dev`, pass
 assert.equal(r.status, 200);
 ok('вход по паролю');
 
+// токен и cors (клиент на github pages)
+const ORIGIN = 'https://gdev49df.github.io';
+const loginRes = await fetch(BASE + '/api/auth/login', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', origin: ORIGIN },
+  body: JSON.stringify({ email: `alice${run}@test.dev`, password: 'password123' }),
+});
+const loginData = await loginRes.json();
+assert.equal(loginRes.headers.get('access-control-allow-origin'), ORIGIN);
+assert.ok(loginData.token && loginData.token.length >= 32);
+ok('логин отдаёт токен и cors-заголовок для github pages');
+
+const viaBearer = await fetch(BASE + '/api/me', { headers: { authorization: `Bearer ${loginData.token}`, origin: ORIGIN } });
+assert.equal(viaBearer.status, 200);
+assert.equal((await viaBearer.json()).user.name, 'Alice');
+const badBearer = await fetch(BASE + '/api/me', { headers: { authorization: 'Bearer ' + 'a'.repeat(64) } });
+assert.equal(badBearer.status, 401);
+ok('авторизация по заголовку Authorization (без cookie)');
+
+const pre = await fetch(BASE + '/api/workspaces', {
+  method: 'OPTIONS',
+  headers: { origin: ORIGIN, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type, authorization' },
+});
+assert.equal(pre.status, 204);
+assert.equal(pre.headers.get('access-control-allow-origin'), ORIGIN);
+assert.match(pre.headers.get('access-control-allow-headers'), /authorization/);
+const evilPre = await fetch(BASE + '/api/workspaces', { method: 'OPTIONS', headers: { origin: 'https://evil.example', 'access-control-request-method': 'POST' } });
+assert.equal(evilPre.status, 403);
+const evil = await fetch(BASE + '/api/me', { headers: { origin: 'https://evil.example', authorization: `Bearer ${loginData.token}` } });
+assert.equal(evil.headers.get('access-control-allow-origin'), null);
+ok('cors: предзапрос только для разрешённого origin, чужим заголовок не выдаётся');
+
 // csrf-защита: не json
 const form = await fetch(BASE + '/api/workspaces', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' });
 assert.equal(form.status, 415);

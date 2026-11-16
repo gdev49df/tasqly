@@ -1,0 +1,39 @@
+name: pages
+
+# публикует клиент (public/) на github pages: https://gdev49df.github.io/tasqly/
+# api и база остаются в cloudflare, сюда подставляется только адрес api
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'public/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: собрать статику
+        run: |
+          cp -r public _site
+          echo "window.TASQLY_API = 'https://tasqly.wsmp.workers.dev';" > _site/config.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

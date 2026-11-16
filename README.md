@@ -23,6 +23,13 @@ npm run deploy
 
 База D1 `tasqly` создана, её id прописан в `wrangler.toml`.
 
+## Два адреса
+
+- **cloudflare workers**: https://tasqly.wsmp.workers.dev/ — сайт и api вместе (вход по cookie)
+- **github pages**: https://gdev49df.github.io/tasqly/ — только клиент, api берёт с cloudflare (вход по токену). публикуется workflow `.github/workflows/pages.yml`; в настройках репозитория: Settings → Pages → Source: **GitHub Actions**
+
+Какие сайты могут ходить в api, задаёт `ALLOWED_ORIGINS` в `wrangler.toml`.
+
 ## Структура
 
 - `src/worker.js` — API: регистрация и вход (PBKDF2, сессии в D1), пространства, проекты, задачи, комментарии

@@ -89,8 +89,15 @@ function sessionCookie(token, maxAgeSeconds) {
 
 // ---------- доступ ----------
 
+// токен сессии: заголовок Authorization: Bearer ... (для клиента на другом домене) или cookie (тот же домен)
+function getToken(req) {
+  const auth = req.headers.get('authorization') || '';
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return parseCookies(req.headers.get('cookie')).tq_session || '';
+}
+
 async function currentUser(req, env) {
-  const token = parseCookies(req.headers.get('cookie')).tq_session;
+  const token = getToken(req);
   if (!token) return null;
   const row = await env.DB.prepare(
     `SELECT u.id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id
@@ -107,7 +114,7 @@ async function createSession(env, userId) {
   await env.DB.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
     .bind(await sha256(token), userId, now() + maxAge * 1000)
     .run();
-  return sessionCookie(token, maxAge);
+  return { token, cookie: sessionCookie(token, maxAge) };
 }
 
 async function requireMember(env, workspaceId, userId) {
@@ -201,8 +208,8 @@ route(
       .bind(id, email, name, hash, salt, now())
       .run();
 
-    const cookie = await createSession(env, id);
-    return json({ user: { id, email, name } }, 201, { 'set-cookie': cookie });
+    const { token, cookie } = await createSession(env, id);
+    return json({ user: { id, email, name }, token }, 201, { 'set-cookie': cookie });
   },
   { auth: false },
 );
@@ -220,8 +227,8 @@ route(
     const { hash } = await hashPassword(password, user ? user.pass_salt : '00'.repeat(16));
     if (!user || !safeEqual(hash, user.pass_hash)) fail(401, 'неверный email или пароль');
 
-    const cookie = await createSession(env, user.id);
-    return json({ user: { id: user.id, email: user.email, name: user.name } }, 200, { 'set-cookie': cookie });
+    const { token, cookie } = await createSession(env, user.id);
+    return json({ user: { id: user.id, email: user.email, name: user.name }, token }, 200, { 'set-cookie': cookie });
   },
   { auth: false },
 );
@@ -230,7 +237,7 @@ route(
   'POST',
   '/api/auth/logout',
   async ({ env, req }) => {
-    const token = parseCookies(req.headers.get('cookie')).tq_session;
+    const token = getToken(req);
     if (token) await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256(token)).run();
     return json({ ok: true }, 200, { 'set-cookie': sessionCookie('', 0) });
   },
@@ -463,8 +470,7 @@ route('POST', '/api/tasks/:id/comments', async ({ env, user, params, body }) => 
 
 // ---------- вход ----------
 
-export default {
-  async fetch(req, env) {
+const handle = async (req, env) => {
     try {
       const url = new URL(req.url);
       const method = req.method;
@@ -509,5 +515,45 @@ export default {
       console.error(e);
       return json({ error: 'внутренняя ошибка' }, 500);
     }
+};
+
+// ---------- cors ----------
+// клиент может жить на другом домене (github pages): разрешаем только origin из ALLOWED_ORIGINS
+function allowedOrigin(req, env) {
+  const origin = req.headers.get('origin');
+  if (!origin) return null;
+  const list = (env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
+  return list.includes(origin) ? origin : null;
+}
+
+function withCors(res, origin) {
+  const out = new Response(res.body, res);
+  out.headers.append('vary', 'Origin');
+  if (origin) {
+    out.headers.set('access-control-allow-origin', origin);
+    out.headers.set('access-control-expose-headers', 'content-type');
+  }
+  return out;
+}
+
+export default {
+  async fetch(req, env) {
+    const origin = allowedOrigin(req, env);
+    if (req.method === 'OPTIONS') {
+      // предзапрос: отвечаем только разрешённым origin
+      if (!origin) return new Response(null, { status: 403 });
+      return withCors(
+        new Response(null, {
+          status: 204,
+          headers: {
+            'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+            'access-control-allow-headers': 'content-type, authorization',
+            'access-control-max-age': '86400',
+          },
+        }),
+        origin,
+      );
+    }
+    return withCors(await handle(req, env), origin);
   },
 };

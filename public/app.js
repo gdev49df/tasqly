@@ -36,12 +36,36 @@
     toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
   }
 
+  // адрес api: пусто = тот же домен (cloudflare), иначе внешний (клиент на github pages)
+  const API_BASE = String(window.TASQLY_API || '').replace(/\/$/, '');
+  const tokenStore = {
+    get() {
+      try {
+        return localStorage.getItem('tq_token') || '';
+      } catch {
+        return '';
+      }
+    },
+    set(value) {
+      try {
+        if (value) localStorage.setItem('tq_token', value);
+        else localStorage.removeItem('tq_token');
+      } catch {
+        /* хранилище недоступно */
+      }
+    },
+  };
+
   async function api(method, path, body) {
-    const res = await fetch(path, {
+    const headers = {};
+    if (body !== undefined) headers['content-type'] = 'application/json';
+    const token = tokenStore.get();
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await fetch(API_BASE + path, {
       method,
-      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-      credentials: 'same-origin',
+      credentials: API_BASE ? 'omit' : 'same-origin',
     });
     let data = {};
     try {
@@ -49,11 +73,15 @@
     } catch {
       /* пустой ответ */
     }
-    if (res.status === 401 && state.user) {
-      state.user = null;
-      route();
+    if (res.status === 401) {
+      tokenStore.set('');
+      if (state.user) {
+        state.user = null;
+        route();
+      }
     }
     if (!res.ok) throw new Error(data.error || `ошибка ${res.status}`);
+    if (data.token) tokenStore.set(data.token);
     return data;
   }
 
@@ -107,6 +135,7 @@
     } catch {
       /* всё равно выходим */
     }
+    tokenStore.set('');
     state.user = null;
     location.hash = '#/';
     route();
@@ -548,6 +577,6 @@
   })();
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
   }
 })();
