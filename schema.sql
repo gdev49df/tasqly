@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   pass_hash TEXT NOT NULL,
   pass_salt TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  trial_ends_at INTEGER -- конец пробных 5 дней «Команды», у старых аккаунтов пусто
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

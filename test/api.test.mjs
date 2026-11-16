@@ -431,6 +431,14 @@ assert.ok(r.data.limits.notes_per_workspace > 0 && r.data.limits.ai_per_day > 0)
 }
 ok('лимиты: проекты упираются в потолок, ответ 429 с понятным текстом');
 
+{
+  const t = await client()('POST', '/api/auth/register', { email: `trial${run}@test.dev`, name: 'триал', password: 'password123' });
+  assert.equal(t.status, 201);
+  const days = (t.data.user.trial_ends_at - Date.now()) / 86400000;
+  assert.ok(days > 4.9 && days <= 5, `ожидали 5 дней, получили ${days}`);
+}
+ok('пробный период: новый аккаунт получает 5 дней');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

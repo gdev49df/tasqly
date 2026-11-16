@@ -30,6 +30,7 @@ const json = (data, status = 200, headers = {}) =>
 const toHex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 const fromHex = (hex) => new Uint8Array(hex.match(/../g).map((h) => parseInt(h, 16)));
 const now = () => Date.now();
+const TRIAL_DAYS = 5;
 const newId = () => crypto.randomUUID();
 
 function randomHex(bytes) {
@@ -99,7 +100,7 @@ async function currentUser(req, env) {
   const token = getToken(req);
   if (!token) return null;
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.email, u.name, u.created_at, u.trial_ends_at FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )
     .bind(await sha256(token), now())
@@ -319,13 +320,13 @@ route(
     const { hash, salt } = await hashPassword(password);
     const id = newId();
     await env.DB.prepare(
-      'INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
     )
-      .bind(id, email, name, hash, salt, now())
+      .bind(id, email, name, hash, salt, now(), now() + TRIAL_DAYS * 24 * 3600 * 1000)
       .run();
 
     const { token, cookie } = await createSession(env, id);
-    return json({ user: { id, email, name }, token }, 201, { 'set-cookie': cookie });
+    return json({ user: { id, email, name, trial_ends_at: now() + TRIAL_DAYS * 24 * 3600 * 1000 }, token }, 201, { 'set-cookie': cookie });
   },
   { auth: false },
 );
@@ -336,7 +337,7 @@ route(
   async ({ env, body }) => {
     const email = cleanString(body.email, 'email', { max: 120 }).toLowerCase();
     const password = cleanString(body.password, 'пароль', { min: 1, max: 200 });
-    const user = await env.DB.prepare('SELECT id, email, name, pass_hash, pass_salt FROM users WHERE email = ?')
+    const user = await env.DB.prepare('SELECT id, email, name, trial_ends_at, pass_hash, pass_salt FROM users WHERE email = ?')
       .bind(email)
       .first();
     // хешируем в любом случае, чтобы время ответа не выдавало существование email
@@ -344,7 +345,7 @@ route(
     if (!user || !safeEqual(hash, user.pass_hash)) fail(401, 'неверный email или пароль');
 
     const { token, cookie } = await createSession(env, user.id);
-    return json({ user: { id: user.id, email: user.email, name: user.name }, token }, 200, { 'set-cookie': cookie });
+    return json({ user: { id: user.id, email: user.email, name: user.name, trial_ends_at: user.trial_ends_at }, token }, 200, { 'set-cookie': cookie });
   },
   { auth: false },
 );

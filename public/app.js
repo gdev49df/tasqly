@@ -157,6 +157,15 @@
     return h('span', { class: 'avatar', title: n, style: `background:${AVATAR_COLORS[hash % AVATAR_COLORS.length]}` }, n.trim().charAt(0).toUpperCase());
   }
 
+  // пробный период «Команды»: 5 дней у новых аккаунтов; null у старых
+  function trialState() {
+    const end = state.user && state.user.trial_ends_at;
+    if (!end) return null;
+    const left = Math.ceil((end - Date.now()) / 86400000);
+    return left > 0 ? { active: true, left } : { active: false, left: 0 };
+  }
+  const daysWord = (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'день' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'дня' : 'дней'}`;
+
   const pad = (n) => String(n).padStart(2, '0');
   const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const todayIso = () => isoOf(new Date());
@@ -632,7 +641,7 @@
     // логотип: знак «q» на акцентном фоне + слово
   const PLANS = [
     { name: 'Старт', price: '0 ₸', per: 'навсегда', text: 'Для одиночек и небольших дел.', items: ['Проекты и задачи', 'Заметки', 'Таймер времени', 'До 3 человек'] },
-    { name: 'Команда', price: '2 500 ₸', per: 'за человека в мес', text: 'Для команд, где важен контроль.', badge: 'Популярный', items: ['Всё из «Старт»', 'Чат и диск', 'Обзор и отчёты по времени', 'AI-помощник', 'Без ограничения по людям'] },
+    { name: 'Команда', price: '2 500 ₸', per: 'за человека в мес', text: 'Для команд, где важен контроль. 5 дней бесплатно.', badge: 'Популярный', trial: true, items: ['Всё из «Старт»', 'Чат и диск', 'Обзор и отчёты по времени', 'AI-помощник', 'Без ограничения по людям'] },
     { name: 'Бизнес', price: 'по запросу', per: '', text: 'Для компаний со своими требованиями.', items: ['Всё из «Команда»', 'Помощь с запуском', 'Приоритетная поддержка', 'Свои условия'] },
   ];
 
@@ -641,7 +650,7 @@
     h('div', { class: 'pr-price' }, h('b', null, pl.price), pl.per ? h('small', null, pl.per) : null),
     h('p', null, pl.text),
     h('ul', null, pl.items.map((t) => h('li', null, t))),
-    h('a', { class: 'btn pr-go', href: i === 2 ? '/contacts' : '/register' }, i === 2 ? 'Связаться' : 'Начать'));
+    h('a', { class: 'btn pr-go', href: i === 2 ? '/contacts' : '/register' }, i === 2 ? 'Связаться' : pl.trial ? 'Попробовать 5 дней' : 'Начать'));
   function logoEl(attrs) {
     return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), h('span', { class: 'logo-word' }, 'tasqly'));
   }
@@ -1156,7 +1165,7 @@
             h('h1', null, 'Вся работа команды на ', h('em', { class: 'wave' }, 'одной доске')),
             h('p', null, 'tasqly собирает задачи, учёт времени, заметки, чат и файлы в одном пространстве. AI подскажет, что горит, и разобьёт большую задачу на шаги.'),
             h('div', { class: 'hero-cta' }, state.user ? h('a', { class: 'btn big', href: PANEL }, 'Открыть кабинет') : [h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Создать пространство'), h('a', { class: 'btn ghost big', href: PANEL + '#/login' }, 'Войти')]),
-            h('div', { class: 'hero-note' }, 'Регистрация за минуту. Карта не нужна.'),
+            h('div', { class: 'hero-note' }, '5 дней «Команды» в подарок. Регистрация за минуту, карта не нужна.'),
           ),
           demo,
         ),
@@ -1207,6 +1216,7 @@
       const limits = [['10', 'пространств у владельца'], ['30', 'проектов в пространстве'], ['500', 'задач в проекте'], ['100', 'заметок в пространстве'], ['100', 'файлов в пространстве'], ['40', 'запросов к AI в день']];
       const faq = [
         ['Нужна ли карта, чтобы начать?', 'Нет. «Старт» бесплатный и без срока: регистрируешься и работаешь.'],
+        ['Как работает пробный период?', 'Новый аккаунт получает 5 дней «Команды» с открытыми чатом, диском, обзором времени и AI. Карта для этого не нужна.'],
         ['Когда появится оплата?', 'Пока её нет, тарифы ориентировочные. Перед запуском оплаты мы заранее напишем об условиях.'],
         ['Что считается человеком в «Команде»?', 'Каждый участник пространства, которому ты дал доступ к проектам.'],
         ['Можно ли перейти с тарифа на тариф?', 'Да, в любой момент: данные и проекты остаются на месте.'],
@@ -1350,6 +1360,12 @@
       h(
         'div',
         { class: 'container home' },
+        (() => {
+          const t = trialState();
+          return t && t.active
+            ? h('div', { class: 'trial-banner' }, h('span', { class: 'trial-dot' }), h('div', null, h('b', null, `Пробный период «Команды»: ${t.left === 1 ? 'последний день' : 'осталось ' + daysWord(t.left)}`), h('span', null, 'Все возможности открыты: чат, диск, обзор времени и AI.')), h('a', { class: 'btn small ghost', href: '/pricing' }, 'Тарифы'))
+            : null;
+        })(),
         h('div', { class: 'home-hero' },
           h('h1', null, `${hello}, `, h('em', { class: 'wave-u' }, state.user.name)),
           h('p', { class: 'sub' }, workspaces.length ? 'Выбери пространство, чтобы продолжить работу.' : 'Создай первое пространство для своей команды.')),
@@ -1429,6 +1445,11 @@
             h('div', { class: 'prof-mail' }, user.email),
             since ? h('div', { class: 'prof-since' }, `В tasqly с ${since}`) : null)),
         h('div', { class: 'home-stats' }, tile(workspaces.length, plural(workspaces.length, 'пространство', 'пространства', 'пространств')), tile(sum('projects'), plural(sum('projects'), 'проект', 'проекта', 'проектов')), tile(sum('my_open'), plural(sum('my_open'), 'моя открытая задача', 'моих открытых задачи', 'моих открытых задач'))),
+        (() => {
+          const t = trialState();
+          return h('div', { class: 'prof-card' }, h('h2', null, 'Тариф'),
+            row(t && t.active ? 'Пробный период «Команда»' : 'Старт', t ? (t.active ? `Осталось ${daysWord(t.left)}. Все возможности открыты.` : 'Пробный период закончился. Оплата пока не подключена, всё продолжает работать.') : 'Бесплатный тариф без ограничения по сроку.', h('a', { class: 'btn ghost small', href: '/pricing' }, 'Сравнить тарифы')));
+        })(),
         h('div', { class: 'prof-card' },
           h('h2', null, 'AI на сегодня'),
           h('div', { class: 'prof-ai' }, h('b', null, `${usage.ai_used} из ${usage.ai_limit}`), h('span', null, 'запросов использовано, счётчик обнуляется каждый день')),

@@ -74,4 +74,4 @@ npx wrangler d1 execute tasqly --remote --file=migrations/0002_columns_labels_ch
 
 затем, если база уже была на версии 0002, выполнить `migrations/0003_time_notes_chat_files.sql` так же.
 
-затем `migrations/0004_ai_usage.sql`.
+затем `migrations/0004_ai_usage.sql`, затем `migrations/0005_trial.sql` (пробные 5 дней, колонка `users.trial_ends_at`).
