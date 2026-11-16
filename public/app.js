@@ -703,7 +703,7 @@
       h(
         'div',
         { class: 'land' },
-        h('header', { class: 'land-nav' }, logo, h('nav', { class: 'land-links' }, h('button', { onclick: to('features') }, 'Возможности'), h('button', { onclick: to('kinds') }, 'Проекты'), h('button', { onclick: to('steps') }, 'Как начать')), h('span', { class: 'grow' }), h('a', { class: 'btn ghost small', href: '#/login' }, 'Войти'), h('a', { class: 'btn small', href: '#/register' }, 'Начать сейчас')),
+        h('header', { class: 'land-nav' }, logo, h('nav', { class: 'land-links' }, h('button', { onclick: to('features') }, 'Возможности'), h('button', { onclick: to('kinds') }, 'Проекты'), h('button', { onclick: to('steps') }, 'Как начать')), h('span', { class: 'grow' }), ...(state.user ? [h('a', { class: 'btn small', href: '#/' }, 'Кабинет')] : [h('a', { class: 'btn ghost small', href: '#/login' }, 'Войти'), h('a', { class: 'btn small', href: '#/register' }, 'Начать сейчас')])),
         h(
           'section',
           { class: 'hero' },
@@ -712,7 +712,7 @@
             { class: 'hero-copy' },
             h('h1', null, 'Вся работа команды на одной доске'),
             h('p', null, 'tasqly собирает задачи, учёт времени, заметки, чат и файлы в одном пространстве. AI подскажет, что горит, и разобьёт большую задачу на шаги.'),
-            h('div', { class: 'hero-cta' }, h('a', { class: 'btn big', href: '#/register' }, 'Создать пространство'), h('a', { class: 'btn ghost big', href: '#/login' }, 'Войти')),
+            h('div', { class: 'hero-cta' }, state.user ? h('a', { class: 'btn big', href: '#/' }, 'Открыть кабинет') : [h('a', { class: 'btn big', href: '#/register' }, 'Создать пространство'), h('a', { class: 'btn ghost big', href: '#/login' }, 'Войти')]),
             h('div', { class: 'hero-note' }, 'Регистрация за минуту. Карта не нужна.'),
           ),
           demo,
@@ -2471,6 +2471,7 @@
     void app.offsetWidth;
     app.classList.add('page-enter');
     const hash = location.hash || '#/';
+    if (state.user && hash === '#/about') return viewLanding();
     if (!state.user) {
       if (hash === '#/login') return viewAuth('login');
       if (hash === '#/register') return viewAuth('register');
