@@ -33,11 +33,46 @@
   const themeStore = store('tq_theme', 'auto');
   const viewStore = store('tq_view', 'board');
 
+  const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
+  const effTheme = (t = themeStore.get()) => (t === 'auto' ? (darkMq.matches ? 'dark' : 'light') : t);
   function applyTheme(theme) {
     if (theme === 'auto') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.eff = effTheme(theme);
   }
   applyTheme(themeStore.get());
+  darkMq.addEventListener('change', () => applyTheme(themeStore.get()));
+
+  // плавная смена темы: круг расходится от кнопки (View Transitions), без поддержки — мягкое затухание цветов
+  function setTheme(next, from) {
+    const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const commit = () => { themeStore.set(next); applyTheme(next); };
+    if (calm) return commit();
+    const root = document.documentElement;
+    if (document.startViewTransition && from && from.getBoundingClientRect) {
+      const r = from.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const rad = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+      root.classList.add('theme-vt');
+      const vt = document.startViewTransition(commit);
+      vt.ready.then(() => root.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${rad}px at ${x}px ${y}px)`] },
+        { duration: 620, easing: 'cubic-bezier(.22,.8,.24,1)', pseudoElement: '::view-transition-new(root)' },
+      )).catch(() => {});
+      vt.finished.finally(() => root.classList.remove('theme-vt'));
+      return;
+    }
+    root.classList.add('theme-fade');
+    commit();
+    setTimeout(() => root.classList.remove('theme-fade'), 520);
+  }
+  function themeToggle(extra = '') {
+    const btn = h('button', { class: `icon-btn theme-toggle ${extra}`.trim(), title: 'Светлая / тёмная тема', 'aria-label': 'Сменить тему' });
+    btn.innerHTML = '<svg class="i-sun" viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.6"/><path d="M10 2.5v1.8M10 15.7v1.8M2.5 10h1.8M15.7 10h1.8M4.7 4.7l1.3 1.3M14 14l1.3 1.3M15.3 4.7 14 6M6 14l-1.3 1.3"/></svg><svg class="i-moon" viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 11.6A6.8 6.8 0 0 1 8.4 3.5a6.8 6.8 0 1 0 8.1 8.1z"/></svg>';
+    btn.addEventListener('click', () => setTheme(effTheme() === 'dark' ? 'light' : 'dark', btn));
+    return btn;
+  }
 
   // ---------- утилиты ----------
 
@@ -570,8 +605,7 @@
         label: `Тема: ${names[themeStore.get()]}`,
         onClick() {
           const next = order[(order.indexOf(themeStore.get()) + 1) % order.length];
-          themeStore.set(next);
-          applyTheme(next);
+          setTheme(next, anchor);
           toast(THEME_TEXT[next]);
         },
       },
@@ -795,6 +829,7 @@
       quickBtn,
       trackBtn,
       aiBtn,
+      themeToggle(),
       mail,
       profile,
     );
@@ -838,12 +873,7 @@
 
     const chev = () => { const sp = h('span', { class: 'chev', 'aria-hidden': 'true' }); sp.innerHTML = '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>'; return sp; };
     const dd = (label, items) => h('button', { class: 'nav-dd', 'aria-haspopup': 'menu', onclick: (e) => openMenu(e.currentTarget, items.map(([t, id]) => ({ label: t, onClick: to(id) }))) }, label, chev());
-    const themeNames = { auto: 'Авто', light: 'Светлая', dark: 'Тёмная' };
-    const themeChip = h('button', { class: 'nav-chip', 'aria-label': 'Сменить тему', onclick: () => {
-      const order = ['auto', 'light', 'dark'];
-      const next = order[(order.indexOf(themeStore.get()) + 1) % order.length];
-      themeStore.set(next); applyTheme(next); themeChip.querySelector('span').textContent = themeNames[next];
-    } }, h('i', { class: 'chip-dot' }), h('span', null, themeNames[themeStore.get()]));
+    const themeChip = themeToggle('nav-theme');
     function landNav() {
       return h(
         'header',
@@ -1145,7 +1175,7 @@
     const cta = state.user ? h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет') : h('a', { class: 'btn small nav-cta', href: '/register' }, 'Начать сейчас');
     const nav = h('header', { class: 'land-nav' }, logoEl(), h('span', { class: 'grow' }),
       h('nav', { class: 'land-links' }, h('a', { class: 'nav-link', href: '/pricing' }, 'Тарифы'), h('a', { class: 'nav-link', href: '/contacts' }, 'Контакты')),
-      ...(state.user ? [] : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '/login' }, 'Войти')]), cta);
+      ...(state.user ? [] : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '/login' }, 'Войти')]), themeToggle('nav-theme'), cta);
     const foot = h('footer', { class: 'land-foot' },
       h('div', { class: 'lf-in' },
         h('div', { class: 'lf-brand' }, logoEl(), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве.')),

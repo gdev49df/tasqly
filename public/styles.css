@@ -1656,3 +1656,20 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 [data-seo] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* кнопка удаления проекта — той же высоты, что и вкладки вида */
 .project-head .del-project { height: 35px; padding: 0 14px; border-radius: 10px; display: inline-flex; align-items: center; font-size: 13.5px; }
+
+/* v8.2: переключатель светлой/тёмной темы и плавная смена */
+.theme-toggle { position: relative; display: inline-grid; place-items: center; overflow: hidden; }
+.theme-toggle svg { grid-area: 1 / 1; transition: transform .5s cubic-bezier(.22,.8,.24,1), opacity .3s ease; }
+:root[data-eff='dark'] .theme-toggle .i-moon, :root:not([data-eff]) .theme-toggle .i-moon { opacity: 0; transform: rotate(-70deg) scale(.4); }
+:root[data-eff='light'] .theme-toggle .i-sun { opacity: 0; transform: rotate(70deg) scale(.4); }
+.theme-toggle:hover svg { color: var(--accent, var(--text)); }
+.nav-theme { margin: 0 4px; }
+@media (max-width: 900px) { .nav-theme { display: inline-grid; } }
+/* круговое раскрытие новой темы */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2; }
+.theme-vt * { transition: none !important; }
+/* запасной вариант: мягкое затухание цветов */
+.theme-fade, .theme-fade *, .theme-fade *::before, .theme-fade *::after { transition: background-color .45s ease, color .45s ease, border-color .45s ease, fill .45s ease, stroke .45s ease, box-shadow .45s ease !important; }
+@media (prefers-reduced-motion: reduce) { .theme-toggle svg { transition: none; } }
