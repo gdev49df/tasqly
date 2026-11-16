@@ -28,7 +28,7 @@ npm run deploy
 - **cloudflare workers**: https://tasqly.wsmp.workers.dev/ — сайт и api вместе (вход по cookie)
 - **github pages**: https://gdev49df.github.io/tasqly/ — только клиент, api берёт с cloudflare (вход по токену). публикуется workflow `.github/workflows/pages.yml`; в настройках репозитория: Settings → Pages → Source: **GitHub Actions**
 
-Какие сайты могут ходить в api, задаёт `ALLOWED_ORIGINS` в `wrangler.toml`.
+Сайт работает на одном адресе (https://tasqly.wsmp.workers.dev/); страница на github pages только переадресует сюда. Список чужих сайтов для api задаёт `ALLOWED_ORIGINS` в `wrangler.toml` (сейчас пуст).
 
 ## Структура
 

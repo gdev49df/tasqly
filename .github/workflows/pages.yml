@@ -1,12 +1,11 @@
 name: pages
 
-# публикует клиент (public/) на github pages: https://gdev49df.github.io/tasqly/
-# api и база остаются в cloudflare, сюда подставляется только адрес api
+# сайт живёт на одном адресе: https://tasqly.wsmp.workers.dev/
+# на github pages остаётся только страница-переадресация, чтобы старая ссылка не ломалась
 on:
   push:
     branches: [main]
     paths:
-      - 'public/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -29,8 +28,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: собрать статику
         run: |
-          cp -r public _site
-          echo "window.TASQLY_API = 'https://tasqly.wsmp.workers.dev';" > _site/config.js
+          mkdir _site
+          cat > _site/index.html <<'EOF'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>tasqly</title>
+          <meta http-equiv="refresh" content="0; url=https://tasqly.wsmp.workers.dev/">
+          <link rel="canonical" href="https://tasqly.wsmp.workers.dev/">
+          <script>location.replace('https://tasqly.wsmp.workers.dev/' + location.hash)</script>
+          <a href="https://tasqly.wsmp.workers.dev/">tasqly</a>
+          EOF
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
