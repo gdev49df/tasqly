@@ -666,6 +666,33 @@
       ['IT', 'Для разработки: спринты, ревью, баги и фичи', ['Бэклог', 'Спринт', 'В работе', 'Code review', 'Тестирование', 'Готово']],
     ];
 
+    const roles = [
+      ['Руководителю', ['Видно, что в работе, что просрочено и у кого перегруз', 'Обзор проекта: процент выполнения и ближайшие дедлайны', 'AI отвечает на вопрос «что горит» за секунды']],
+      ['Менеджеру проектов', ['Три типа проектов и свои колонки под процесс', 'Доска, список и календарь над одними и теми же задачами', 'Оценка времени против факта по каждой задаче']],
+      ['Разработчику', ['Колонки спринта, code review и тестирования', 'Типы задач: задача, баг, фича, тех. долг', 'Таймер в задаче и чек-листы для подзадач']],
+      ['Фрилансеру и одиночке', ['Базовый проект на три колонки, без лишнего', 'Личные заметки и файлы в одном месте', 'AI разобьёт большое дело на шаги']],
+    ];
+    const tabsData = [
+      ['Планирование', 'Ставь задачи, назначай исполнителей и сроки, раскладывай по колонкам и меткам. Перетаскивай карточки на доске и даты в календаре.'],
+      ['Время', 'Включай таймер прямо в задаче или вноси время вручную. Отчёт по людям и проектам показывает, куда уходят часы.'],
+      ['Общение', 'Чат пространства, комментарии к задачам и общие заметки. Договорённости остаются рядом с работой.'],
+      ['AI', 'Помощник знает твои задачи: подскажет, что горит, соберёт план на день и превратит текст встречи в список задач.'],
+    ];
+    let roleIdx = 0, tabIdx = 0;
+    const rolesBox = h('div', { class: 'roles' });
+    const paintRoles = () => rolesBox.replaceChildren(
+      h('div', { class: 'role-tabs', role: 'tablist' }, roles.map(([n], i) => h('button', { role: 'tab', class: i === roleIdx ? 'active' : '', 'aria-selected': String(i === roleIdx), onclick: () => { roleIdx = i; paintRoles(); } }, n))),
+      h('ul', { class: 'role-list' }, roles[roleIdx][1].map((t) => h('li', null, t))),
+    );
+    paintRoles();
+    const tabsBox = h('div', { class: 'ftabs' });
+    const paintTabs = () => tabsBox.replaceChildren(
+      h('div', { class: 'role-tabs', role: 'tablist' }, tabsData.map(([n], i) => h('button', { role: 'tab', class: i === tabIdx ? 'active' : '', 'aria-selected': String(i === tabIdx), onclick: () => { tabIdx = i; paintTabs(); } }, n))),
+      h('p', { class: 'ftab-text' }, tabsData[tabIdx][1]),
+      h('a', { class: 'btn', href: '#/register' }, 'Попробовать tasqly'),
+    );
+    paintTabs();
+
     const steps = [
       ['Создай пространство', 'Это место для твоей команды. Пригласи людей кодом из шести символов.'],
       ['Заведи проект', 'Выбери тип под свой процесс. Колонки можно менять как угодно.'],
@@ -676,7 +703,7 @@
       h(
         'div',
         { class: 'land' },
-        h('header', { class: 'land-nav' }, logo, h('nav', { class: 'land-links' }, h('button', { onclick: to('features') }, 'Возможности'), h('button', { onclick: to('kinds') }, 'Проекты'), h('button', { onclick: to('steps') }, 'Как начать')), h('span', { class: 'grow' }), h('a', { class: 'btn ghost small', href: '#/login' }, 'Войти'), h('a', { class: 'btn small', href: '#/register' }, 'Начать')),
+        h('header', { class: 'land-nav' }, logo, h('nav', { class: 'land-links' }, h('button', { onclick: to('features') }, 'Возможности'), h('button', { onclick: to('kinds') }, 'Проекты'), h('button', { onclick: to('steps') }, 'Как начать')), h('span', { class: 'grow' }), h('a', { class: 'btn ghost small', href: '#/login' }, 'Войти'), h('a', { class: 'btn small', href: '#/register' }, 'Начать сейчас')),
         h(
           'section',
           { class: 'hero' },
@@ -690,6 +717,8 @@
           ),
           demo,
         ),
+        h('section', { class: 'land-sec', id: 'roles' }, h('h2', null, 'Одно решение для разных ролей'), rolesBox),
+        h('section', { class: 'land-sec', id: 'tabs' }, h('h2', null, 'tasqly подстраивается под твои задачи'), tabsBox),
         h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('dl', { class: 'feat' }, features.map(([t, d]) => h('div', null, h('dt', null, t), h('dd', null, d))))),
         h(
           'section',
