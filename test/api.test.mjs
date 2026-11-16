@@ -394,7 +394,9 @@ r = await alice('POST', `/api/tasks/${bug.id}/ai/subtasks`, {});
 assert.equal(r.status, 200);
 assert.deepEqual(r.data.items, ['Шаг 1', 'Шаг 2', 'Шаг 3']);
 assert.equal((await outsider('POST', `/api/tasks/${bug.id}/ai/subtasks`, {})).status, 404);
-ok('ai: чат, задачи из текста, подзадачи, права');
+r = await alice('POST', `/api/workspaces/${wsId}/ai/chat`, { message: 'напиши ```python print(1)```' });
+assert.match(r.data.reply, /только с задачами и проектами/);
+ok('ai: чат, задачи из текста, подзадачи, права, код в ответе блокируется');
 
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
