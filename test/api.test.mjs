@@ -499,6 +499,15 @@ ok('поиск: находит своё, не показывает чужое, �
   assert.equal((await client()('GET', `/api/public/project/${tok}`)).status, 404, 'после выключения ссылка мертва');
 }
 ok('публичная ссылка: только просмотр, без лишних данных, выключается');
+{
+  const dw = (await alice('POST', '/api/workspaces', { name: 'на удаление' })).data.workspace;
+  const dcode = (await alice('GET', `/api/workspaces/${dw.id}`)).data.workspace.invite_code;
+  await bob('POST', '/api/workspaces/join', { code: dcode });
+  assert.equal((await bob('DELETE', `/api/workspaces/${dw.id}`, {})).status, 403, 'участник не удаляет');
+  assert.equal((await alice('DELETE', `/api/workspaces/${dw.id}`, {})).status, 200);
+  assert.equal((await alice('GET', `/api/workspaces/${dw.id}`)).status, 404);
+}
+ok('удаление пространства: только владелец');
 ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
 
 // лимиты на количество объектов

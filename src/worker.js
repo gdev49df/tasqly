@@ -578,6 +578,13 @@ route('POST', '/api/workspaces/join', async ({ env, user, body }) => {
   return json({ workspace: { id: ws.id, name: ws.name } });
 });
 
+route('DELETE', '/api/workspaces/:id', async ({ env, user, params }) => {
+  const role = await requireMember(env, params.id, user.id);
+  if (role !== 'owner') fail(403, 'удалять пространство может только владелец');
+  await env.DB.prepare('DELETE FROM workspaces WHERE id = ?').bind(params.id).run();
+  return json({ ok: true });
+});
+
 route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
   const role = await requireMember(env, params.id, user.id);
   const ws = await env.DB.prepare('SELECT id, name, invite_code FROM workspaces WHERE id = ?').bind(params.id).first();

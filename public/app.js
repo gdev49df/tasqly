@@ -1764,6 +1764,18 @@
       }
     };
 
+    const removeWs = async () => {
+      if (!confirm(`Удалить пространство «${workspace.name}» навсегда? Проекты, задачи, заметки, чат и файлы будут удалены, вернуть их нельзя.`)) return;
+      try {
+        await api.del(`/api/workspaces/${id}`);
+        cacheClear();
+        toast('Пространство удалено');
+        location.hash = '#/';
+      } catch (e) {
+        toast(e.message);
+      }
+    };
+
     return h(
       'div',
       null,
@@ -1797,6 +1809,9 @@
         h('p', { class: 'sub', style: 'margin-bottom:12px' }, 'Отправь ссылку: человек зарегистрируется или войдёт и сразу попадёт в пространство. Или пришли только код'),
         h('div', { class: 'row' }, h('span', { class: 'invite' }, workspace.invite_code), h('button', { class: 'btn small', onclick: copyLink }, 'Копировать ссылку'), h('button', { class: 'btn ghost small', onclick: copyCode }, 'Только код')),
       ),
+      workspace.role === 'owner'
+        ? h('div', { class: 'card danger-zone', style: 'margin-top:16px' }, h('div', { class: 'row', style: 'justify-content:space-between;gap:12px' }, h('div', null, h('h2', { style: 'margin:0 0 4px' }, 'Удалить пространство'), h('div', { class: 'sub', style: 'margin:0' }, 'Все проекты, задачи, заметки, чат и файлы удалятся навсегда.')), h('button', { class: 'btn danger small', onclick: removeWs }, 'Удалить')))
+        : null,
     );
   }
 
