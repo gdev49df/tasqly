@@ -100,13 +100,20 @@ async function currentUser(req, env) {
   const token = getToken(req);
   if (!token) return null;
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.created_at, u.trial_ends_at FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.email, u.name, u.created_at, u.trial_ends_at, u.plan FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )
     .bind(await sha256(token), now())
     .first();
-  return row || null;
+  return row ? shapeUser(row) : null;
 }
+
+// тариф: start (бесплатный), team, business; пробный период «Команды» даёт effective_plan = team
+function effectivePlan(u) {
+  return u.plan === 'start' && u.trial_ends_at && u.trial_ends_at > now() ? 'team' : u.plan || 'start';
+}
+const shapeUser = (u) => ({ id: u.id, email: u.email, name: u.name, created_at: u.created_at, trial_ends_at: u.trial_ends_at || null, plan: u.plan || 'start', effective_plan: effectivePlan(u) });
+const PLAN_MEMBERS = { start: 3, team: 30, business: Infinity };
 
 async function createSession(env, userId) {
   const token = randomHex(32);
@@ -337,13 +344,13 @@ route(
     const { hash, salt } = await hashPassword(password);
     const id = newId();
     await env.DB.prepare(
-      'INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at, plan) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',
     )
-      .bind(id, email, name, hash, salt, now(), now() + TRIAL_DAYS * 24 * 3600 * 1000)
+      .bind(id, email, name, hash, salt, now(), 'start')
       .run();
 
     const { token, cookie } = await createSession(env, id);
-    return json({ user: { id, email, name, trial_ends_at: now() + TRIAL_DAYS * 24 * 3600 * 1000 }, token }, 201, { 'set-cookie': cookie });
+    return json({ user: shapeUser({ id, email, name, created_at: now(), trial_ends_at: null, plan: 'start' }), token }, 201, { 'set-cookie': cookie });
   },
   { auth: false },
 );
@@ -354,7 +361,7 @@ route(
   async ({ env, body }) => {
     const email = cleanString(body.email, 'email', { max: 120 }).toLowerCase();
     const password = cleanString(body.password, 'пароль', { min: 1, max: 200 });
-    const user = await env.DB.prepare('SELECT id, email, name, trial_ends_at, pass_hash, pass_salt FROM users WHERE email = ?')
+    const user = await env.DB.prepare('SELECT id, email, name, created_at, trial_ends_at, plan, pass_hash, pass_salt FROM users WHERE email = ?')
       .bind(email)
       .first();
     // хешируем в любом случае, чтобы время ответа не выдавало существование email
@@ -362,7 +369,7 @@ route(
     if (!user || !safeEqual(hash, user.pass_hash)) fail(401, 'неверный email или пароль');
 
     const { token, cookie } = await createSession(env, user.id);
-    return json({ user: { id: user.id, email: user.email, name: user.name, trial_ends_at: user.trial_ends_at }, token }, 200, { 'set-cookie': cookie });
+    return json({ user: shapeUser(user), token }, 200, { 'set-cookie': cookie });
   },
   { auth: false },
 );
@@ -379,6 +386,15 @@ route(
 );
 
 route('GET', '/api/me', async ({ user }) => json({ user }));
+
+// пробный период «Команды»: включается кнопкой, один раз на аккаунт
+route('POST', '/api/me/trial', async ({ env, user }) => {
+  if (user.plan !== 'start') fail(409, 'у тебя уже платный тариф');
+  if (user.trial_ends_at) fail(409, 'пробный период уже использован');
+  const end = now() + TRIAL_DAYS * 24 * 3600 * 1000;
+  await env.DB.prepare('UPDATE users SET trial_ends_at = ? WHERE id = ?').bind(end, user.id).run();
+  return json({ user: shapeUser({ ...user, trial_ends_at: end }) });
+});
 
 // профиль: имя, использование ai за сегодня, выход на других устройствах
 route('PATCH', '/api/me', async ({ env, user, body }) => {
@@ -510,14 +526,24 @@ route('POST', '/api/workspaces', async ({ env, user, body }) => {
 
 route('POST', '/api/workspaces/join', async ({ env, user, body }) => {
   const code = cleanString(body.code, 'код', { max: 20 }).toUpperCase();
-  const ws = await env.DB.prepare('SELECT id, name FROM workspaces WHERE invite_code = ?').bind(code).first();
+  const ws = await env.DB.prepare(
+    `SELECT w.id, w.name, u.plan, u.trial_ends_at FROM workspaces w JOIN users u ON u.id = w.owner_id WHERE w.invite_code = ?`,
+  )
+    .bind(code)
+    .first();
   if (!ws) fail(404, 'код приглашения не найден');
+  const already = await env.DB.prepare('SELECT 1 FROM members WHERE workspace_id = ? AND user_id = ?').bind(ws.id, user.id).first();
+  if (!already) {
+    const limit = PLAN_MEMBERS[effectivePlan(ws)];
+    const cnt = await env.DB.prepare('SELECT COUNT(*) AS c FROM members WHERE workspace_id = ?').bind(ws.id).first();
+    if (cnt.c >= limit) fail(403, `в пространстве уже ${cnt.c} участников: это максимум тарифа владельца. Попроси его перейти на тариф выше`);
+  }
   await env.DB.prepare(
     'INSERT OR IGNORE INTO members (workspace_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)',
   )
     .bind(ws.id, user.id, 'member', now())
     .run();
-  return json({ workspace: ws });
+  return json({ workspace: { id: ws.id, name: ws.name } });
 });
 
 route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {

@@ -459,12 +459,34 @@ assert.ok(r.data.limits.notes_per_workspace > 0 && r.data.limits.ai_per_day > 0)
 ok('лимиты: проекты упираются в потолок, ответ 429 с понятным текстом');
 
 {
-  const t = await client()('POST', '/api/auth/register', { email: `trial${run}@test.dev`, name: 'триал', password: 'password123' });
+  const c = client();
+  const t = await c('POST', '/api/auth/register', { email: `trial${run}@test.dev`, name: 'триал', password: 'password123' });
   assert.equal(t.status, 201);
-  const days = (t.data.user.trial_ends_at - Date.now()) / 86400000;
+  assert.equal(t.data.user.plan, 'start');
+  assert.equal(t.data.user.trial_ends_at, null);
+  assert.equal(t.data.user.effective_plan, 'start');
+  const on = await c('POST', '/api/me/trial', {});
+  assert.equal(on.status, 200);
+  const days = (on.data.user.trial_ends_at - Date.now()) / 86400000;
   assert.ok(days > 4.9 && days <= 5, `ожидали 5 дней, получили ${days}`);
+  assert.equal(on.data.user.effective_plan, 'team');
+  assert.equal((await c('POST', '/api/me/trial', {})).status, 409);
 }
-ok('пробный период: новый аккаунт получает 5 дней');
+ok('пробный период: включается кнопкой, один раз, даёт тариф «Команда»');
+
+{
+  // на «Старте» в пространстве максимум 3 участника
+  const lw = (await alice('POST', '/api/workspaces', { name: 'тариф' })).data.workspace;
+  const code2 = (await alice('GET', `/api/workspaces/${lw.id}`)).data.workspace.invite_code;
+  const joined = [];
+  for (let i = 0; i < 3; i++) {
+    const c = client();
+    await c('POST', '/api/auth/register', { email: `m${i}-${run}@test.dev`, name: `М${i}`, password: 'password123' });
+    joined.push((await c('POST', '/api/workspaces/join', { code: code2 })).status);
+  }
+  assert.deepEqual(joined, [200, 200, 403]);
+}
+ok('тариф «Старт»: в пространстве не больше 3 участников');
 
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);

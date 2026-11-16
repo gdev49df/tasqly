@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
   pass_hash TEXT NOT NULL,
   pass_salt TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  trial_ends_at INTEGER -- конец пробных 5 дней «Команды», у старых аккаунтов пусто
+  trial_ends_at INTEGER, -- конец пробных 5 дней «Команды», пусто пока не включён
+  plan TEXT NOT NULL DEFAULT 'start' -- start, team, business
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

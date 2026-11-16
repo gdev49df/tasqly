@@ -200,6 +200,45 @@
     const left = Math.ceil((end - Date.now()) / 86400000);
     return left > 0 ? { active: true, left } : { active: false, left: 0 };
   }
+  async function startTrial(done) {
+    try {
+      const { user } = await api.post('/api/me/trial', {});
+      state.user = user;
+      saveUser();
+      cacheClear();
+      toast('Пробный период начался: 5 дней «Команды»');
+      if (done) done();
+      quietRoute = false;
+      route();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  // окно после регистрации: предложить пробный период кнопкой
+  function maybeOfferTrial() {
+    let flag = null;
+    try { flag = sessionStorage.getItem('tq_trial_offer'); } catch { /* нет хранилища */ }
+    if (!flag || !state.user) return;
+    try { sessionStorage.removeItem('tq_trial_offer'); } catch { /* нет хранилища */ }
+    if (state.user.plan !== 'start' || state.user.trial_ends_at) return;
+    const overlay = h('div', { class: 'overlay' });
+    const close = () => closeOverlay(overlay);
+    overlay.addEventListener('tq-close', close);
+    overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+    const go = h('button', { class: 'btn', type: 'button' }, 'Начать пробный период');
+    go.addEventListener('click', () => { go.disabled = true; startTrial(close).then(() => (go.disabled = false)); });
+    overlay.append(
+      h('div', { class: 'modal narrow trial-offer', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Пробный период' },
+        h('div', { class: 'head' }, h('h1', { style: 'font-size:20px;flex:1;margin:0' }, `Попробуй «Команду» ${daysWord(5)} бесплатно`), h('button', { class: 'icon-btn', onclick: close, 'aria-label': 'Закрыть' }, '✕')),
+        h('p', { class: 'sub', style: 'margin:0 0 12px' }, 'Откроются все возможности: до 30 человек в пространстве, чат, диск, обзор времени и AI. Карта не нужна, после пробного периода ничего не списывается.'),
+        h('ul', { class: 'trial-list' }, ['До 30 человек в пространстве', 'Командный чат и общий диск', 'Обзор времени и AI-помощник'].map((x) => h('li', null, x))),
+        h('div', { class: 'modal-actions' }, h('button', { class: 'btn ghost', type: 'button', onclick: close }, 'Позже'), go),
+      ),
+    );
+    document.body.append(overlay);
+  }
+
   const daysWord = (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'день' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'дня' : 'дней'}`;
 
   const pad = (n) => String(n).padStart(2, '0');
@@ -1334,9 +1373,11 @@
         const res = await api.post(mode === 'login' ? '/api/auth/login' : '/api/auth/register', data);
         state.user = res.user;
         saveUser();
+        if (mode === 'register') { try { sessionStorage.setItem('tq_trial_offer', '1'); } catch { /* нет хранилища */ } }
         if (external) { location.href = PANEL; return; }
         if (location.hash === '#/') route();
         else location.hash = '#/';
+        setTimeout(maybeOfferTrial, 500);
       } catch (err) {
         error.textContent = err.message;
         btn.disabled = false;
@@ -1428,7 +1469,7 @@
         { class: 'container home' },
         (() => {
           const t = trialState();
-          return t && t.active
+          return t && t.active && state.user.plan === 'start'
             ? h('div', { class: 'trial-banner' }, h('span', { class: 'trial-dot' }), h('div', null, h('b', null, `Пробный период «Команды»: ${t.left === 1 ? 'последний день' : 'осталось ' + daysWord(t.left)}`), h('span', null, 'Все возможности открыты: чат, диск, обзор времени и AI.')), h('a', { class: 'btn small ghost', href: '/pricing' }, 'Тарифы'))
             : null;
         })(),
@@ -1515,8 +1556,12 @@
         h('div', { class: 'home-stats' }, tile(workspaces.length, plural(workspaces.length, 'пространство', 'пространства', 'пространств')), tile(sum('projects'), plural(sum('projects'), 'проект', 'проекта', 'проектов')), tile(sum('my_open'), plural(sum('my_open'), 'моя открытая задача', 'моих открытых задачи', 'моих открытых задач'))),
         (() => {
           const t = trialState();
+          const paid = user.plan && user.plan !== 'start';
+          const startBtn = h('button', { class: 'btn small', onclick: () => startTrial() }, 'Начать пробный период');
+          const cmp = h('a', { class: 'btn ghost small', href: '/pricing' }, 'Сравнить тарифы');
+          if (paid) return h('div', { class: 'prof-card' }, h('h2', null, 'Тариф'), row(user.plan === 'business' ? 'Бизнес' : 'Команда', 'Все возможности открыты.', cmp));
           return h('div', { class: 'prof-card' }, h('h2', null, 'Тариф'),
-            row(t && t.active ? 'Пробный период «Команда»' : 'Старт', t ? (t.active ? `Осталось ${daysWord(t.left)}. Все возможности открыты.` : 'Пробный период закончился. Оплата пока не подключена, всё продолжает работать.') : 'Бесплатный тариф без ограничения по сроку.', h('a', { class: 'btn ghost small', href: '/pricing' }, 'Сравнить тарифы')));
+            row(t && t.active ? 'Пробный период «Команда»' : 'Старт', t ? (t.active ? `Осталось ${daysWord(t.left)}. Все возможности открыты.` : 'Пробный период закончился. Оплата пока не подключена, всё продолжает работать.') : 'Бесплатно, до 3 человек в пространстве. Можно попробовать «Команду» 5 дней.', t ? cmp : startBtn));
         })(),
         h('div', { class: 'prof-card' },
           h('h2', null, 'AI на сегодня'),
@@ -3476,6 +3521,7 @@
       // уже входили: показываем сразу, а профиль сверяем фоном
       state.user = cached;
       route();
+      maybeOfferTrial();
       api.get('/api/me').then(({ user }) => {
         const changed = JSON.stringify(user) !== JSON.stringify(state.user);
         state.user = user;
@@ -3491,6 +3537,7 @@
       state.user = null;
     }
     route();
+    maybeOfferTrial();
   })();
 
   if ('serviceWorker' in navigator) {
