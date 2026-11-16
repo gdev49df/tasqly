@@ -8,7 +8,7 @@
 
   const PRIORITIES = ['Без приоритета', 'Низкий', 'Средний', 'Высокий'];
   const LABEL_COLORS = ['#e5484d', '#f76b15', '#f5a524', '#30a46c', '#12a594', '#3e63dd', '#8e4ec6', '#d6409f'];
-  const AVATAR_COLORS = ['#5b5bd6', '#30a46c', '#e5484d', '#f76b15', '#12a594', '#8e4ec6', '#d6409f', '#3e63dd'];
+  const AVATAR_COLORS = ['#3e3e3a', '#30a46c', '#e5484d', '#f76b15', '#12a594', '#8e4ec6', '#d6409f', '#3e63dd'];
 
   // ---------- хранилище и тема ----------
 
@@ -577,7 +577,7 @@
     mark.setAttribute('viewBox', '0 0 512 512');
     mark.setAttribute('class', 'logo-mark');
     mark.setAttribute('aria-hidden', 'true');
-    mark.innerHTML = '<rect width="512" height="512" rx="112" fill="currentColor"/><g fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g>';
+    mark.innerHTML = '<rect width="512" height="512" rx="112" fill="currentColor"/><g fill="none" stroke="#111" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g>';
     return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), mark, h('span', null, 'tasq', h('b', null, 'ly')));
   }
 
@@ -941,7 +941,7 @@
       ['Небольшим командам', ['Общий чат', 'Диск с файлами', 'Приглашение по коду', 'Роли доступа'],
         h('div', { class: 'rc-vis rc-team' }, h('div', { class: 'rt-msg' }, h('span', { class: 'avatar', style: 'background:#3e63dd' }, 'А'), 'Макеты готовы, смотрите'), h('div', { class: 'rt-msg me' }, 'Принято, беру вёрстку'), h('div', { class: 'rt-file' }, h('i', null, 'PDF'), 'бриф-клиента.pdf', h('em', null, '184 КБ')))],
     ];
-    const track = h('div', { class: 'rc-track' }, h('article', { class: 'rc rc-intro' }, h('span', { class: 'rc-brand' }, svgEl('<svg viewBox="0 0 512 512" width="30" height="30"><rect width="512" height="512" rx="112" fill="#fff" fill-opacity=".22"/><g fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g></svg>', 'rc-mark')), h('h2', null, 'Одно решение для всех ролей'), h('div', { class: 'rc-avatars' }, ...['#3e63dd', '#8e4ec6', '#30a46c', '#e5484d'].map((c, i) => h('span', { class: 'avatar', style: `background:${c}` }, 'АДМС'[i])))), ...roleCards.map(([title, tags, vis]) => h('article', { class: 'rc' }, h('h3', null, title), h('div', { class: 'rc-tags' }, tags.map((t) => h('span', null, t))), vis)));
+    const track = h('div', { class: 'rc-track' }, h('article', { class: 'rc rc-intro' }, h('span', { class: 'rc-brand' }, svgEl('<svg viewBox="0 0 512 512" width="30" height="30"><rect width="512" height="512" rx="112" fill="#111"/><g fill="none" stroke="#c6f432" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g></svg>', 'rc-mark')), h('h2', null, 'Одно решение для всех ролей'), h('div', { class: 'rc-avatars' }, ...['#3e63dd', '#8e4ec6', '#30a46c', '#e5484d'].map((c, i) => h('span', { class: 'avatar', style: `background:${c}` }, 'АДМС'[i])))), ...roleCards.map(([title, tags, vis]) => h('article', { class: 'rc' }, h('h3', null, title), h('div', { class: 'rc-tags' }, tags.map((t) => h('span', null, t))), vis)));
     const slide = (dir) => track.scrollBy({ left: dir * Math.min(420, track.clientWidth * 0.7), behavior: calmMotion ? 'auto' : 'smooth' });
     const rolesBox = h('div', { class: 'rc-wrap' }, track);
     // автоход: вправо до конца, потом обратно; пауза при наведении и касании
