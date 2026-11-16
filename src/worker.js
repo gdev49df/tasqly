@@ -491,6 +491,17 @@ route('POST', '/api/auth/password', async ({ env, req, user, body }) => {
 
 // ---------- сброс пароля по почте (Resend) ----------
 
+function htmlToText(html) {
+  return html
+    .replace(/<a [^>]*href="([^"]+)"[^>]*>([^<]*)<\/a>/g, (m, h, t) => (t.trim() === h ? h : `${t.trim()}: ${h}`))
+    .replace(/<\/(h1|p|li|div)>|<br\s*\/?>/g, '\n')
+    .replace(/<li[^>]*>/g, '- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 async function sendMail(env, to, subject, html) {
   if (env.MAIL_MOCK) {
     (globalThis.__outbox ||= []).push({ to, subject, html });
@@ -504,7 +515,7 @@ async function sendMail(env, to, subject, html) {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from: env.MAIL_FROM || 'tasqly <onboarding@resend.dev>', to: [to], subject, html }),
+      body: JSON.stringify({ from: env.MAIL_FROM || 'tasqly <onboarding@resend.dev>', to: [to], subject, html, text: htmlToText(html) }),
     });
     if (!res.ok) console.error('resend:', res.status, (await res.text()).slice(0, 300));
     return res.ok;
@@ -538,7 +549,13 @@ route(
             env,
             email,
             'Сброс пароля tasqly',
-            `<div style="font-family:system-ui,sans-serif;max-width:480px;line-height:1.5;color:#111"><h2 style="margin:0 0 12px">Сброс пароля</h2><p>Привет, ${escHtml(u.name)}! Чтобы задать новый пароль, нажми на кнопку. Ссылка действует час.</p><p><a href="${link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600">Задать новый пароль</a></p><p style="color:#666;font-size:13px">Если ты не просил сброс, просто проигнорируй письмо: пароль останется прежним.</p></div>`,
+            mailLayout(appUrl(env, req), {
+              title: 'Сброс пароля',
+              lead: `Привет, ${escHtml(u.name)}! Чтобы задать новый пароль, нажми на кнопку. Ссылка действует час.`,
+              href: link,
+              hrefText: 'Задать новый пароль',
+              footer: 'Если ты не просил сброс, просто проигнорируй письмо: пароль останется прежним.',
+            }),
           );
         }
       }
@@ -584,7 +601,13 @@ async function sendVerification(env, req, u) {
     env,
     u.email,
     'Подтверди почту в tasqly',
-    `<div style="font-family:system-ui,sans-serif;max-width:480px;line-height:1.5;color:#111"><h2 style="margin:0 0 12px">Подтверди почту</h2><p>Привет, ${escHtml(u.name)}! Нажми на кнопку, чтобы подтвердить адрес. Ссылка действует двое суток.</p><p><a href="${link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600">Подтвердить почту</a></p><p style="color:#666;font-size:13px">Если ты не регистрировался в tasqly, просто проигнорируй письмо.</p></div>`,
+    mailLayout(appUrl(env, req), {
+      title: 'Подтверди почту',
+      lead: `Привет, ${escHtml(u.name)}! Нажми на кнопку, чтобы подтвердить адрес. Ссылка действует двое суток.`,
+      href: link,
+      hrefText: 'Подтвердить почту',
+      footer: 'Если ты не регистрировался в tasqly, просто проигнорируй письмо.',
+    }),
   );
   return { token, sent };
 }
@@ -808,9 +831,22 @@ route(
 const DEFAULT_APP = 'https://tasqly.wsmp.workers.dev';
 const appUrl = (env, req) => String(env.APP_URL || (req ? new URL(req.url).origin : DEFAULT_APP)).replace(/\/$/, '');
 
-function mailLayout(base, { title, lead, items = [], href, hrefText }) {
-  const list = items.length ? `<ul style="margin:0 0 16px;padding-left:18px;color:#333">${items.map((x) => `<li style="margin:4px 0">${x}</li>`).join('')}</ul>` : '';
-  return `<div style="font-family:system-ui,sans-serif;max-width:480px;line-height:1.5;color:#111"><h2 style="margin:0 0 12px">${escHtml(title)}</h2><p style="margin:0 0 14px">${lead}</p>${list}<p><a href="${href}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600">${escHtml(hrefText)}</a></p><p style="color:#666;font-size:13px">Эти письма можно отключить в <a href="${base}/panel/#/profile" style="color:#666">профиле</a>.</p></div>`;
+function mailLayout(base, { title, lead, items = [], href, hrefText, footer }) {
+  const list = items.length
+    ? `<ul style="margin:0 0 20px;padding-left:20px;color:#3a3a40;font-size:15px;line-height:1.6">${items.map((x) => `<li style="margin:4px 0">${x}</li>`).join('')}</ul>`
+    : '';
+  const note = footer || `Эти письма можно отключить в <a href="${base}/panel/#/profile" style="color:#8a8a93">профиле</a>.`;
+  return `<div style="background:#f4f4ef;padding:28px 12px;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif">
+<div style="max-width:480px;margin:0 auto">
+<div style="padding:0 4px 14px;font-size:24px;font-weight:800;letter-spacing:-0.5px;color:#111">tasqly<span style="color:#c6f432">.</span></div>
+<div style="background:#fff;border:1px solid #e6e6df;border-radius:16px;padding:28px 26px;color:#111">
+<h1 style="margin:0 0 12px;font-size:22px;line-height:1.25;letter-spacing:-0.3px">${escHtml(title)}</h1>
+<p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#3a3a40">${lead}</p>
+${list}<a href="${href}" style="display:inline-block;background:#c6f432;color:#111;text-decoration:none;padding:13px 24px;border-radius:12px;font-weight:700;font-size:15px">${escHtml(hrefText)}</a>
+<p style="margin:18px 0 0;font-size:12.5px;line-height:1.5;color:#8a8a93;word-break:break-all">Если кнопка не нажимается, открой ссылку:<br><a href="${href}" style="color:#8a8a93">${href}</a></p>
+</div>
+<p style="margin:14px 6px 0;font-size:12.5px;line-height:1.5;color:#8a8a93">${note}</p>
+</div></div>`;
 }
 
 // письмо уходит, только если у человека подтверждена почта и включён нужный переключатель
