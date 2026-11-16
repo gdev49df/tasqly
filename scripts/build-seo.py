@@ -20,7 +20,7 @@ PAGES = {
   'terms': dict(title='Условия использования · tasqly', desc='Условия использования tasqly.', index=True, prio='0.2', h1='Условия использования', text='Условия использования tasqly.'),
   'panel': dict(title='Кабинет · tasqly', desc=DESC, index=False, h1='Кабинет tasqly', text='Войди, чтобы работать с задачами, временем, заметками и чатом.'),
 }
-GOOGLE = 'TFd_xlGrplHit-fv_AoYr6XhpIQHhYTs9C7gltcOTYs'  # подтверждение Search Console, только главная
+GOOGLE = ['TFd_xlGrplHit-fv_AoYr6XhpIQHhYTs9C7gltcOTYs', 'qtTrhKQPrQRRudL47tVWaxlOJHF-p-8FdEcr2Ty45Uk']  # подтверждение Search Console, только главная
 START, END = '<!-- seo:start -->', '<!-- seo:end -->'
 def esc(s): return s.replace('&', '&amp;').replace('"', '&quot;').replace('<', '&lt;')
 for slug, p in PAGES.items():
@@ -30,7 +30,7 @@ for slug, p in PAGES.items():
     html = re.sub(r'\s*<title>.*?</title>', '', html, flags=re.S)
     html = re.sub(r'\s*<meta name="description"[^>]*>', '', html)
     html = re.sub(START + r'.*?' + END + r'\s*', '', html, flags=re.S)
-    verify = f'  <meta name="google-site-verification" content="{GOOGLE}">\n' if not slug else ''
+    verify = ''.join(f'  <meta name="google-site-verification" content="{g}">\n' for g in GOOGLE) if not slug else ''
     block = f'''{START}
   <title>{esc(p['title'])}</title>
   <meta name="description" content="{esc(p['desc'])}">
