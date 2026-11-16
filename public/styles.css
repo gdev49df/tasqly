@@ -1546,3 +1546,33 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .ai-facts li::before { content: '✓'; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--lime); color: var(--lime-ink); font-size: 10px; display: grid; place-items: center; top: 2px; }
 @media (max-width: 860px) { .ai-sec { grid-template-columns: 1fr; padding: 26px 20px; gap: 28px; } }
 .rc-brand { width: auto; height: auto; background: none; box-shadow: none; padding: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.045em; color: var(--lime-ink); line-height: 1; }
+
+/* v7.2: чипы-подсказки AI лаймовые при наведении; свечение секции крупнее */
+.sc-chips span, .ai-chips span { cursor: default; transition: background .25s var(--ease-out), color .25s, border-color .25s, transform .25s var(--ease-out); }
+.sc-chips span:hover, .ai-chips span:hover { background: var(--lime); color: var(--lime-ink); border-color: var(--lime); transform: translateY(-2px); }
+.ai-sec::before { width: 640px; height: 640px; right: -180px; top: -260px; background: radial-gradient(circle, color-mix(in srgb, var(--lime) 34%, transparent), transparent 68%); }
+@media (max-width: 860px) { .ai-sec::before { width: 440px; height: 440px; right: -140px; top: -180px; } }
+
+/* v7.3: сообщения в мини-экранах вкладок — с аватарами, именами и временем */
+.tv-chat, .tv-ai { gap: 14px; justify-content: center; padding: 6px 2px; }
+.tv-m { display: flex; align-items: flex-end; gap: 10px; max-width: 86%; align-self: flex-start; }
+.tv-m.me { align-self: flex-end; flex-direction: row-reverse; }
+.tv-av { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; }
+.tv-av.ai { background: var(--lime); color: var(--lime-ink); font-size: 10px; }
+.tv-b { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tv-m.me .tv-b { align-items: flex-end; }
+.tv-n { font-size: 12px; font-weight: 600; color: var(--muted); padding-left: 2px; }
+.tv-chat .tv-b p, .tv-ai .tv-b p { max-width: none; width: fit-content; align-self: auto; margin: 0; padding: 10px 14px; border-radius: 16px 16px 16px 5px; background: var(--surface); border: 1px solid var(--border); font-size: 14px; line-height: 1.5; }
+.tv-m.me .tv-b p { border-radius: 16px 16px 5px 16px; background: var(--text); color: var(--bg); border-color: var(--text); }
+.tv-b time { font-size: 11px; color: var(--faint); padding: 0 3px; }
+.tv-li { display: block; margin-top: 6px; color: var(--muted); }
+.tv-li strong { color: var(--text); font-weight: 600; }
+.tv-chat .tv-file { margin-left: 38px; }
+.tv-ai .tv-chips { margin-left: 38px; }
+.tv-ai .tv-chips span { transition: background .25s var(--ease-out), color .25s, border-color .25s; }
+.tv-ai .tv-chips span:hover { background: var(--lime); color: var(--lime-ink); border-color: var(--lime); }
+
+/* v7.4: строка типа проекта подсвечивается, когда к ней перешли из меню */
+.kind-row { transition: box-shadow .5s var(--ease-out), background .5s; border-radius: 14px; }
+.kind-row.flash { animation: kind-flash 1.8s var(--ease-out); }
+@keyframes kind-flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 20%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lime) 70%, transparent); background: color-mix(in srgb, var(--lime) 8%, transparent); } }

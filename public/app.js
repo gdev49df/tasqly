@@ -822,7 +822,10 @@
     destroyDock();
     const to = (id) => () => {
       const el = document.getElementById(id);
-      if (el) el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+      if (!el) return;
+      const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      el.scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: el.classList.contains('kind-row') ? 'center' : 'start' });
+      if (el.classList.contains('kind-row')) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1800); }
     };
     const logo = logoEl();
     const calmMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -841,7 +844,7 @@
         { class: 'land-nav' },
         logo,
         h('span', { class: 'grow' }),
-        h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'roles'], ['Учёт времени', 'sc-time'], ['AI tasqly', 'ai']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать'), h('button', { onclick: to('pricing') }, 'Тарифы')),
+        h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'roles'], ['Учёт времени', 'sc-time'], ['AI tasqly', 'ai']]), dd('Проекты', [['Базовый', 'kind-basic'], ['Продвинутый', 'kind-advanced'], ['IT', 'kind-it']]), h('button', { onclick: to('steps') }, 'Как начать'), h('button', { onclick: to('pricing') }, 'Тарифы')),
         ...(state.user
           ? [h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет')]
           : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: '/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: PANEL + '#/register' }, 'Начать сейчас')]),
@@ -881,6 +884,7 @@
       ['IT', 'Для разработки: спринты, ревью, баги и фичи', ['Бэклог', 'Спринт', 'В работе', 'Code review', 'Тестирование', 'Готово']],
     ];
 
+    const tvMsg = (name, color, text, time) => h('div', { class: `tv-m${name ? '' : ' me'}` }, name ? h('span', { class: 'tv-av', style: `background:${color}` }, name[0]) : null, h('div', { class: 'tv-b' }, name ? h('b', { class: 'tv-n' }, name) : null, h('p', null, text), h('time', null, time)));
     let tabIdx = 0;
     const tabsData = [
       ['Планирование', 'Ставь задачи, назначай исполнителей и сроки, раскладывай по колонкам и меткам. Карточки и даты перетаскиваются мышью.',
@@ -888,9 +892,9 @@
       ['Время', 'Таймер включается в задаче или время вносится вручную. Отчёт по людям и проектам показывает, куда уходят часы.',
         () => h('div', { class: 'tv-time' }, h('div', { class: 'tv-clock' }, h('span', { class: 'rec' }), h('b', null, '00:42:17')), ...[['Айгерим', 80, '6 ч 40 мин'], ['Данияр', 52, '4 ч 15 мин'], ['Мария', 26, '2 ч 05 мин']].map(([n, w, t]) => h('div', { class: 'tv-row' }, h('span', null, n), h('i', null, h('u', { style: `width:${w}%` })), h('em', null, t))))],
       ['Общение', 'Чат пространства, комментарии к задачам и общие заметки. Договорённости остаются рядом с работой.',
-        () => h('div', { class: 'tv-chat' }, h('p', null, 'Макеты готовы, смотрите'), h('p', { class: 'me' }, 'Принято, беру вёрстку'), h('p', null, 'Бриф лежит на диске'), h('div', { class: 'tv-file' }, h('i', null, 'PDF'), 'бриф-клиента.pdf', h('em', null, '184 КБ')))],
+        () => h('div', { class: 'tv-chat' }, tvMsg('Айгерим', '#8e4ec6', 'Макеты готовы, смотрите', '10:12'), tvMsg(null, null, 'Принято, беру вёрстку', '10:14'), tvMsg('Айгерим', '#8e4ec6', 'Бриф лежит на диске', '10:15'), h('div', { class: 'tv-file' }, h('i', null, 'PDF'), 'бриф-клиента.pdf', h('em', null, '184 КБ')))],
       ['AI', 'Помощник знает твои задачи: подскажет, что горит, соберёт план на день и превратит текст встречи в список задач.',
-        () => h('div', { class: 'tv-ai' }, h('p', { class: 'me' }, 'Что горит на этой неделе?'), h('p', null, 'Две задачи требуют внимания: «Подключить оплату» просрочена, «Согласовать макеты» через 5 дней.'), h('div', { class: 'tv-chips' }, h('span', null, 'Назначить Данияра'), h('span', null, 'План на день')))],
+        () => h('div', { class: 'tv-ai' }, tvMsg(null, null, 'Что горит на этой неделе?', '10:20'), h('div', { class: 'tv-m' }, h('span', { class: 'tv-av ai' }, 'AI'), h('div', { class: 'tv-b' }, h('b', { class: 'tv-n' }, 'AI tasqly'), h('p', null, 'Две задачи требуют внимания:', h('span', { class: 'tv-li' }, h('strong', null, 'Подключить оплату'), ' просрочена'), h('span', { class: 'tv-li' }, h('strong', null, 'Согласовать макеты'), ' срок через 5 дней')))), h('div', { class: 'tv-chips' }, h('span', null, 'Назначить Данияра'), h('span', null, 'План на день')))],
     ];
     const tabsBox = h('div', { class: 'ftabs' });
     const tabBtns = tabsData.map(([n, d], i) => h('button', { role: 'tab', onclick: () => selectTab(i) }, h('b', null, n), h('span', null, d)));
@@ -1117,7 +1121,7 @@
           'section',
           { class: 'land-sec', id: 'kinds' },
           h('h2', null, 'Проект под твой процесс'),
-          h('div', { class: 'kinds-list' }, kinds.map(([name, hint, cols]) => h('div', { class: 'kind-row' }, h('div', { class: 'kind-info' }, h('b', null, name), h('span', null, hint)), h('div', { class: 'kind-cols' }, cols.map((c, i) => h('span', { class: `kcol${i === cols.length - 1 ? ' done' : ''}` }, c)))))),
+          h('div', { class: 'kinds-list' }, kinds.map(([name, hint, cols], ki) => h('div', { class: 'kind-row', id: ['kind-basic', 'kind-advanced', 'kind-it'][ki] }, h('div', { class: 'kind-info' }, h('b', null, name), h('span', null, hint)), h('div', { class: 'kind-cols' }, cols.map((c, i) => h('span', { class: `kcol${i === cols.length - 1 ? ' done' : ''}` }, c)))))),
         ),
         stepsSection,
         pricing,
