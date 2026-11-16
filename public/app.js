@@ -439,7 +439,7 @@
       h(
         'aside',
         { class: 'drawer', role: 'dialog', 'aria-label': 'Меню' },
-        h('div', { class: 'drawer-head' }, h('a', { class: 'logo', href: '#/', onclick: close }, 'tasq', h('b', null, 'ly')), h('button', { class: 'icon-btn', 'aria-label': 'Закрыть меню', onclick: close }, '✕')),
+        h('div', { class: 'drawer-head' }, logoEl({ onclick: close }), h('button', { class: 'icon-btn', 'aria-label': 'Закрыть меню', onclick: close }, '✕')),
         h('button', { class: 'drawer-item', onclick: go('#/') }, icon('home'), 'Главная'),
         h('button', { class: 'drawer-item', onclick: () => (close(), openInbox(document.querySelector('.mail-btn'))) }, icon('mail'), 'Входящие'),
         h('div', { class: 'drawer-title' }, 'Пространства'),
@@ -564,6 +564,16 @@
     if (menuEl) menuEl.classList.add('right');
   }
 
+    // логотип: знак «q» на акцентном фоне + слово
+  function logoEl(attrs) {
+    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    mark.setAttribute('viewBox', '0 0 512 512');
+    mark.setAttribute('class', 'logo-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.innerHTML = '<rect width="512" height="512" rx="112" fill="currentColor"/><g fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g>';
+    return h('a', Object.assign({ class: 'logo', href: '#/', 'aria-label': 'tasqly' }, attrs), mark, h('span', null, 'tasq', h('b', null, 'ly')));
+  }
+
   function topbar(crumbs) {
     const mail = state.user ? h('button', { class: 'icon-btn mail-btn', title: 'Входящие', 'aria-label': 'Входящие', onclick: (e) => openInbox(e.currentTarget) }, icon('mail')) : null;
     if (mail) loadBadge(mail);
@@ -581,7 +591,7 @@
       'header',
       { class: 'topbar' },
       state.user ? h('button', { class: 'icon-btn', title: 'Меню', 'aria-label': 'Открыть меню', onclick: openDrawer }, icon('menu')) : null,
-      h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly')),
+      logoEl(),
       h('nav', { class: 'crumbs' }, crumbs.map((c) => [h('span', null, '/'), c.href ? h('a', { href: c.href }, c.label) : h('span', { class: 'current' }, c.label)])),
       h('div', { class: 'timer-slot' }),
       aiBtn,
@@ -621,7 +631,7 @@
       const el = document.getElementById(id);
       if (el) el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     };
-    const logo = h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly'));
+    const logo = logoEl();
 
     // демо-доска: одна карточка сама переезжает в «Готово»
     const demoCard = (title, extra = [], cls = '') => h('div', { class: `demo-card ${cls}` }, h('div', { class: 'demo-title' }, title), h('div', { class: 'demo-meta' }, extra));
@@ -740,7 +750,7 @@
       h(
         'div',
         { class: 'auth' },
-        h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly')),
+        logoEl(),
         h('div', { class: 'tag' }, mode === 'register' ? 'Создай аккаунт и первое пространство' : 'Войди в свой кабинет'),
         h('div', { class: 'card' }, tabs, form),
         h('a', { class: 'auth-back', href: '#/' }, '← О сервисе'),

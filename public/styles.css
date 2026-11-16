@@ -104,6 +104,8 @@ a:hover { text-decoration: underline; }
 }
 
 .logo { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; color: var(--text); }
+.logo { display: inline-flex; align-items: center; gap: 8px; }
+.logo-mark { width: 1.35em; height: 1.35em; color: var(--accent); flex: none; }
 .logo b { color: var(--accent); font-weight: 700; }
 .logo:hover { text-decoration: none; }
 
@@ -204,7 +206,7 @@ h2 { font-size: 13px; margin: 0 0 12px; font-weight: 600; color: var(--muted); l
 /* ---------- вход ---------- */
 
 .auth { max-width: 360px; margin: 12vh auto 0; padding: 0 20px; width: 100%; }
-.auth .logo { font-size: 28px; text-align: center; display: block; margin-bottom: 4px; }
+.auth .logo { font-size: 28px; display: flex; justify-content: center; margin-bottom: 4px; }
 .auth .tag { text-align: center; color: var(--muted); margin-bottom: 24px; }
 .seg { display: inline-flex; background: var(--hover); border-radius: 8px; padding: 2px; gap: 2px; }
 .seg button { border: 0; background: transparent; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-weight: 550; }
