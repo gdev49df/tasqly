@@ -1,0 +1,1 @@
+ALTER TABLE tasks ADD COLUMN repeat TEXT NOT NULL DEFAULT 'none';

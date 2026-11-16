@@ -267,6 +267,23 @@ function validateTaskType(value) {
   if (!TASK_TYPES.includes(value)) fail(400, 'неизвестный тип задачи');
   return value;
 }
+const REPEATS = ['none', 'daily', 'weekly', 'monthly'];
+function validateRepeat(value) {
+  if (!REPEATS.includes(value)) fail(400, 'неизвестный повтор');
+  return value;
+}
+// следующая дата повторения от даты (ГГГГ-ММ-ДД)
+function nextRepeatDate(iso, kind) {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (kind === 'monthly') {
+    const total = m; // следующий месяц, день не больше длины месяца
+    const ny = y + Math.floor(total / 12);
+    const nm = total % 12;
+    const last = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(ny, nm, Math.min(d, last))).toISOString().slice(0, 10);
+  }
+  return new Date(Date.UTC(y, m - 1, d + (kind === 'weekly' ? 7 : 1))).toISOString().slice(0, 10);
+}
 function validateEstimate(value) {
   if (value === null) return null;
   if (!Number.isInteger(value) || value < 0 || value > 60000) fail(400, 'оценка: от 0 до 60000 минут');
@@ -275,7 +292,7 @@ function validateEstimate(value) {
 
 // общий запрос задачи: плюс счётчики и список меток
 const TASK_SELECT = `SELECT t.id, t.project_id, t.column_id, t.title, t.description, t.priority, t.assignee_id, t.due_date,
-    t.position, t.created_at, t.updated_at, t.task_type, t.estimate_min,
+    t.position, t.created_at, t.updated_at, t.task_type, t.estimate_min, t.repeat,
     (SELECT COALESCE(SUM(seconds), 0) FROM time_entries te WHERE te.task_id = t.id AND te.ended_at IS NOT NULL) AS tracked_sec,
     (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) AS comments,
     (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id) AS check_total,
@@ -689,15 +706,16 @@ route('POST', '/api/projects/:id/tasks', async ({ env, user, params, body }) => 
   const assigneeId = await validateAssignee(env, project.workspace_id, body.assignee_id);
   const taskType = body.task_type === undefined ? 'task' : validateTaskType(body.task_type);
   const estimate = body.estimate_min === undefined ? null : validateEstimate(body.estimate_min);
+  const repeat = body.repeat === undefined ? 'none' : validateRepeat(body.repeat);
 
   const position = await nextPosition(env, 'tasks', 'column_id', columnId);
   const id = newId();
   const ts = now();
   await env.DB.prepare(
-    `INSERT INTO tasks (id, project_id, column_id, title, description, priority, assignee_id, due_date, position, created_by, created_at, updated_at, task_type, estimate_min)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, project_id, column_id, title, description, priority, assignee_id, due_date, position, created_by, created_at, updated_at, task_type, estimate_min, repeat)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, params.id, columnId, title, description, priority, assigneeId, dueDate, position, user.id, ts, ts, taskType, estimate)
+    .bind(id, params.id, columnId, title, description, priority, assigneeId, dueDate, position, user.id, ts, ts, taskType, estimate, repeat)
     .run();
   return json({ task: await loadTask(env, id) }, 201);
 });
@@ -721,13 +739,42 @@ route('PATCH', '/api/tasks/:id', async ({ env, user, params, body }) => {
   if (body.position !== undefined) set('position', validatePosition(body.position));
   if (body.task_type !== undefined) set('task_type', validateTaskType(body.task_type));
   if (body.estimate_min !== undefined) set('estimate_min', validateEstimate(body.estimate_min));
+  if (body.repeat !== undefined) set('repeat', validateRepeat(body.repeat));
   if (!sets.length) fail(400, 'нечего обновлять');
+
+  // закрытие повторяющейся задачи: исходная перестаёт повторяться, копия появляется в первой колонке
+  let spawn = null;
+  const repeatNow = body.repeat !== undefined ? body.repeat : task.repeat;
+  if (body.column_id !== undefined && body.column_id !== task.column_id && repeatNow !== 'none') {
+    const cols = await env.DB.prepare('SELECT id, is_done FROM columns WHERE project_id = ? ORDER BY position').bind(task.project_id).all();
+    const to = cols.results.find((c) => c.id === body.column_id);
+    const from = cols.results.find((c) => c.id === task.column_id);
+    if (to && to.is_done && !(from && from.is_done) && cols.results.length) {
+      const base = (body.due_date !== undefined ? body.due_date : task.due_date) || new Date().toISOString().slice(0, 10);
+      spawn = { due: nextRepeatDate(base, repeatNow), column: cols.results[0].id, repeat: repeatNow };
+      set('repeat', 'none');
+    }
+  }
 
   set('updated_at', now());
   await env.DB.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`)
     .bind(...values, params.id)
     .run();
-  return json({ task: await loadTask(env, params.id) });
+  let spawned = null;
+  if (spawn) {
+    const nid = newId();
+    const ts = now();
+    const pos = await nextPosition(env, 'tasks', 'column_id', spawn.column);
+    await env.DB.prepare(
+      `INSERT INTO tasks (id, project_id, column_id, title, description, priority, assignee_id, due_date, position, created_by, created_at, updated_at, task_type, estimate_min, repeat)
+       SELECT ?, project_id, ?, title, description, priority, assignee_id, ?, ?, created_by, ?, ?, task_type, estimate_min, ? FROM tasks WHERE id = ?`,
+    )
+      .bind(nid, spawn.column, spawn.due, pos, ts, ts, spawn.repeat, params.id)
+      .run();
+    await env.DB.prepare('INSERT INTO task_labels (task_id, label_id) SELECT ?, label_id FROM task_labels WHERE task_id = ?').bind(nid, params.id).run();
+    spawned = await loadTask(env, nid);
+  }
+  return json({ task: await loadTask(env, params.id), spawned });
 });
 
 route('PUT', '/api/tasks/:id/labels', async ({ env, user, params, body }) => {

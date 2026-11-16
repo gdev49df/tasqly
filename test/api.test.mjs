@@ -230,6 +230,25 @@ r = await alice('GET', '/api/inbox');
 assert.ok(!r.data.comments.some((c) => c.mentioned === 1));
 ok('упоминания попадают во входящие');
 
+// ---------- повторяющиеся задачи ----------
+{
+  const pr = await alice('GET', `/api/projects/${t1.project_id}`);
+  const doneCol = pr.data.columns.find((c) => c.is_done);
+  const firstCol = pr.data.columns[0];
+  r = await alice('POST', `/api/projects/${t1.project_id}/tasks`, { title: 'Отчёт', due_date: '2026-01-31', repeat: 'monthly' });
+  assert.equal(r.data.task.repeat, 'monthly');
+  const rt = r.data.task;
+  r = await alice('PATCH', `/api/tasks/${rt.id}`, { column_id: doneCol.id });
+  assert.equal(r.data.task.repeat, 'none');
+  assert.equal(r.data.spawned.title, 'Отчёт');
+  assert.equal(r.data.spawned.due_date, '2026-02-28');
+  assert.equal(r.data.spawned.repeat, 'monthly');
+  assert.equal(r.data.spawned.column_id, firstCol.id);
+  await alice('DELETE', `/api/tasks/${rt.id}`, {});
+  await alice('DELETE', `/api/tasks/${r.data.spawned.id}`, {});
+  ok('повторяющиеся задачи: закрытие создаёт следующую копию');
+}
+
 // ---------- удаление колонки, прогресс, каскады ----------
 
 r = await alice('GET', `/api/workspaces/${wsId}`);

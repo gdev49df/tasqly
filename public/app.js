@@ -2185,8 +2185,13 @@
       Object.assign(task, patch);
       paint();
       try {
-        const { task: upd } = await api.patch(`/api/tasks/${task.id}`, patch);
+        const { task: upd, spawned } = await api.patch(`/api/tasks/${task.id}`, patch);
         Object.assign(task, upd);
+        if (spawned) {
+          S.tasks.push(spawned);
+          paint();
+          toast('Следующая повторяющаяся задача создана');
+        }
       } catch (e) {
         Object.assign(task, before);
         paint();
@@ -2636,8 +2641,13 @@
       };
       const save = async (patch) => {
         try {
-          const { task: upd } = await api.patch(`/api/tasks/${task.id}`, patch);
+          const { task: upd, spawned } = await api.patch(`/api/tasks/${task.id}`, patch);
           Object.assign(task, upd);
+          if (spawned) {
+            S.tasks.push(spawned);
+            repeatSel.value = task.repeat;
+            toast('Следующая повторяющаяся задача создана');
+          }
           paint();
           flash();
         } catch (e) {
@@ -2668,6 +2678,9 @@
       assigneeSel.addEventListener('change', () => save({ assignee_id: assigneeSel.value || null }));
       const due = h('input', { type: 'date', value: task.due_date || '' });
       due.addEventListener('change', () => save({ due_date: due.value || null }));
+      const REPEAT_NAMES = { none: 'Не повторять', daily: 'Каждый день', weekly: 'Каждую неделю', monthly: 'Каждый месяц' };
+      const repeatSel = h('select', null, Object.entries(REPEAT_NAMES).map(([k, v]) => h('option', { value: k, selected: k === (task.repeat || 'none') }, v)));
+      repeatSel.addEventListener('change', () => save({ repeat: repeatSel.value }));
 
       const kind = S.project.kind || 'basic';
       const typeSel = h('select', null, Object.entries(TASK_TYPES).map(([k, v]) => h('option', { value: k, selected: k === (task.task_type || 'task') }, v)));
@@ -3068,6 +3081,8 @@
           desc,
           h('div', { class: 'two' }, h('div', null, h('label', { class: 'field' }, 'Колонка'), columnSel), h('div', null, h('label', { class: 'field' }, 'Приоритет'), prioSel)),
           h('div', { class: 'two' }, h('div', null, h('label', { class: 'field' }, 'Исполнитель'), assigneeSel), h('div', null, h('label', { class: 'field' }, 'Срок'), due)),
+          h('label', { class: 'field' }, 'Повтор'),
+          repeatSel,
           kind !== 'basic' ? h('div', { class: 'two' }, kind === 'it' ? h('div', null, h('label', { class: 'field' }, 'Тип задачи'), typeSel) : h('div'), h('div', null, h('label', { class: 'field' }, 'Оценка, часов'), estimate)) : null,
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Время'), timeBox),
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Метки'), labelBox, h('div', { class: 'new-label' }, newName, swatches, h('button', { class: 'btn ghost small', onclick: createLabel }, 'Добавить'))),

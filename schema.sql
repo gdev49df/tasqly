@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_date TEXT, -- YYYY-MM-DD
   task_type TEXT NOT NULL DEFAULT 'task', -- task, bug, feature, debt (для it-проектов)
   estimate_min INTEGER, -- оценка в минутах
+  repeat TEXT NOT NULL DEFAULT 'none', -- none, daily, weekly, monthly
   position REAL NOT NULL DEFAULT 0,
   created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at INTEGER NOT NULL,
