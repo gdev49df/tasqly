@@ -170,6 +170,15 @@
     }).catch(() => {});
     return Promise.resolve(hit);
   };
+  // то же для вкладок: onData вызывается сразу с кешем (если есть), затем со свежими данными, если они отличаются
+  api.swr = async (path, onData) => {
+    const hit = cacheGet(path);
+    const epoch = cacheEpoch;
+    if (hit) onData(hit);
+    const d = await api.get(path);
+    if (epoch === cacheEpoch) cacheSet(path, d);
+    if (!hit || JSON.stringify(d) !== JSON.stringify(hit)) onData(d);
+  };
   api.post = (p, b = {}) => api('POST', p, b);
   api.put = (p, b) => api('PUT', p, b);
   api.patch = (p, b) => api('PATCH', p, b);
@@ -1288,7 +1297,7 @@
     render(nav, h('main', { class: 'pg' }, ...body), foot);
   }
 
-  function viewAuth(initialMode = 'login') {
+  function viewAuth(initialMode = 'login', opts = {}) {
     document.title = initialMode === 'register' ? 'Регистрация · tasqly' : 'Вход · tasqly';
     destroyDock();
     let mode = initialMode;
@@ -1340,7 +1349,7 @@
         'div',
         { class: 'auth' },
         logoEl(),
-        h('div', { class: 'tag' }, mode === 'register' ? 'Создай аккаунт и первое пространство' : 'Войди в свой кабинет'),
+        h('div', { class: 'tag' }, opts.invited ? 'Тебя пригласили в пространство. Создай аккаунт или войди, и ты сразу попадёшь в него' : mode === 'register' ? 'Создай аккаунт и первое пространство' : 'Войди в свой кабинет'),
         h('div', { class: 'card' }, tabs, form),
         h('a', { class: 'auth-back', href: '/' }, '← О сервисе'),
       ),
@@ -1549,6 +1558,15 @@
     };
     nameInput.addEventListener('keydown', (e) => e.key === 'Enter' && create());
 
+    const inviteLink = `${location.origin}${PANEL}#/join/${workspace.invite_code}`;
+    const copyLink = async () => {
+      try {
+        await navigator.clipboard.writeText(inviteLink);
+        toast('Ссылка скопирована');
+      } catch {
+        toast(inviteLink);
+      }
+    };
     const copyCode = async () => {
       try {
         await navigator.clipboard.writeText(workspace.invite_code);
@@ -1588,8 +1606,8 @@
         'div',
         { class: 'card' },
         h('h2', null, 'Пригласить в команду'),
-        h('p', { class: 'sub', style: 'margin-bottom:12px' }, 'Отправь этот код: человек вводит его на главной странице'),
-        h('div', { class: 'row' }, h('span', { class: 'invite' }, workspace.invite_code), h('button', { class: 'btn ghost small', onclick: copyCode }, 'Копировать')),
+        h('p', { class: 'sub', style: 'margin-bottom:12px' }, 'Отправь ссылку: человек зарегистрируется или войдёт и сразу попадёт в пространство. Или пришли только код'),
+        h('div', { class: 'row' }, h('span', { class: 'invite' }, workspace.invite_code), h('button', { class: 'btn small', onclick: copyLink }, 'Копировать ссылку'), h('button', { class: 'btn ghost small', onclick: copyCode }, 'Только код')),
       ),
     );
   }
@@ -1696,12 +1714,12 @@
       }
     };
 
+    let notesShown = false;
     api
-      .get(`/api/workspaces/${id}/notes`)
-      .then((r) => {
+      .swr(`/api/workspaces/${id}/notes`, (r) => {
         notes = r.notes;
         paintList();
-        paintEditor();
+        if (!notesShown) { notesShown = true; paintEditor(); }
       })
       .catch((e) => toast(e.message));
 
@@ -1711,7 +1729,7 @@
   // ---------- отчёт по времени ----------
 
   function panelTime(id) {
-    const box = h('div', null, h('div', { class: 'empty' }, 'Загрузка…'));
+    const box = h('div', null);
     let days = 30;
     const bars = (rows, total) =>
       rows.length
@@ -1720,7 +1738,13 @@
 
     async function load() {
       try {
-        const r = await api.get(`/api/workspaces/${id}/time?days=${days}`);
+        await api.swr(`/api/workspaces/${id}/time?days=${days}`, show);
+      } catch (e) {
+        box.replaceChildren(h('div', { class: 'card empty' }, e.message));
+      }
+    }
+    function show(r) {
+      {
         const periods = h('div', { class: 'seg' }, [7, 30, 90].map((d) => h('button', { class: d === days ? 'active' : '', onclick: () => ((days = d), load()) }, `${d} дн.`)));
         box.replaceChildren(
           h('div', { class: 'time-head' }, h('div', null, h('div', { class: 'big' }, fmtDur(r.total_sec)), h('div', { class: 'sub', style: 'margin:0' }, `всего за ${days} дн.`)), periods),
@@ -1730,8 +1754,6 @@
             ? h('div', { class: 'card flush' }, r.recent.map((e) => h('a', { class: 'time-row', href: `#/p/${e.project_id}` }, h('span', { class: 'grow' }, h('b', null, e.task_title), e.note ? h('span', { class: 'mail-sub' }, ` · ${e.note}`) : null), h('span', { class: 'mail-sub' }, e.author), h('span', { class: 'mail-sub' }, fmtDateTime(e.started_at)), h('span', { class: 'dur' }, fmtDur(e.seconds)))))
             : h('div', { class: 'card empty' }, 'Включи таймер в окне задачи или добавь время вручную: здесь появится отчёт.'),
         );
-      } catch (e) {
-        box.replaceChildren(h('div', { class: 'card empty' }, e.message));
       }
     }
     load();
@@ -1762,7 +1784,17 @@
     }
     async function poll() {
       try {
-        const r = await api.get(`/api/workspaces/${id}/messages${last ? `?after=${last}` : ''}`);
+        let r;
+        if (!last && !list.childElementCount) {
+          // первый показ: прошлые сообщения из кеша сразу, свежие подтягиваем
+          const path = `/api/workspaces/${id}/messages`;
+          const hit = cacheGet(path);
+          if (hit) { add(hit.messages); list.scrollTop = list.scrollHeight; }
+          r = await api.get(path);
+          if (!hit || r.messages.length !== hit.messages.length) cacheSet(path, r);
+        } else {
+          r = await api.get(`/api/workspaces/${id}/messages${last ? `?after=${last}` : ''}`);
+        }
         add(r.messages);
         if (!last && !r.messages.length) list.replaceChildren(h('div', { class: 'empty', id: 'chat-empty' }, 'Сообщений пока нет. Напиши первым.'));
       } catch {
@@ -2018,10 +2050,11 @@
     let canDelete = false;
     async function load() {
       try {
-        const r = await api.get(`/api/workspaces/${id}/files`);
-        files = r.files;
-        info = r;
-        paint();
+        await api.swr(`/api/workspaces/${id}/files`, (r) => {
+          files = r.files;
+          info = r;
+          paint();
+        });
       } catch (e) {
         toast(e.message);
       }
@@ -3159,10 +3192,30 @@
       if (['/pricing', '/contacts', '/privacy', '/terms'].includes(path)) return viewPublicPage(path.slice(1));
       return viewLanding();
     }
+    const joinHash = hash.match(/^#\/join\/([A-Za-z0-9]{3,20})$/);
     if (!state.user) {
+      if (joinHash) {
+        try { sessionStorage.setItem('tq_join', joinHash[1].toUpperCase()); } catch { /* нет хранилища */ }
+        return viewAuth('register', { invited: true });
+      }
       if (hash === '#/login') return viewAuth('login');
       if (hash === '#/register') return viewAuth('register');
       return viewAuth(hash === '#/register' ? 'register' : 'login');
+    }
+    {
+      let pending = joinHash ? joinHash[1].toUpperCase() : '';
+      try { pending = pending || sessionStorage.getItem('tq_join') || ''; sessionStorage.removeItem('tq_join'); } catch { /* нет хранилища */ }
+      if (pending) {
+        try {
+          const { workspace } = await api.post('/api/workspaces/join', { code: pending });
+          toast(`Ты в пространстве «${workspace.name}»`);
+          location.hash = `#/w/${workspace.id}`;
+        } catch (e) {
+          toast(e.message);
+          location.hash = '#/';
+        }
+        return;
+      }
     }
     if (hash === '#/login' || hash === '#/register') {
       location.hash = '#/';
