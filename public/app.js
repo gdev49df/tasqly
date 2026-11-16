@@ -528,6 +528,64 @@
     setTimeout(() => overlay.remove(), 190);
   }
 
+  async function exportData() {
+    try {
+      const data = await api.get('/api/me/export');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      const a = h('a', { href: url, download: 'tasqly-export.json' });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('Файл скачан');
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  function openDeleteAccount() {
+    const email = h('input', { type: 'email', name: 'email', autocomplete: 'off', placeholder: state.user.email });
+    const pw = passwordField({ name: 'pw', autocomplete: 'current-password', 'aria-label': 'Пароль' });
+    const error = h('div', { class: 'error' });
+    const overlay = h('div', { class: 'overlay' });
+    const close = () => closeOverlay(overlay);
+    overlay.addEventListener('tq-close', close);
+    overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+    const submit = h('button', { class: 'btn danger', type: 'submit' }, 'Удалить навсегда');
+    const form = h('form', { novalidate: true, class: 'modal narrow', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Удаление аккаунта' },
+      h('div', { class: 'head' }, h('h1', { style: 'font-size:18px;flex:1;margin:0' }, 'Удалить аккаунт'), h('button', { type: 'button', class: 'icon-btn', onclick: close, 'aria-label': 'Закрыть' }, '✕')),
+      h('p', { class: 'sub', style: 'margin:0 0 4px' }, 'Аккаунт и все пространства, где ты один, удалятся без возможности вернуть. Из чужих пространств ты просто выйдешь. Если у тебя есть пространство с другими людьми, сначала удали его или убери участников. Перед удалением можно скачать данные в профиле.'),
+      h('label', { class: 'field' }, 'Набери свой email для подтверждения'),
+      email,
+      h('label', { class: 'field' }, 'Пароль'),
+      pw,
+      h('div', { class: 'sub', style: 'margin:6px 0 0;font-size:12px' }, 'Если входишь только через Google и пароля нет, оставь поле пустым.'),
+      error,
+      h('div', { class: 'modal-actions' }, h('button', { type: 'button', class: 'btn ghost', onclick: close }, 'Отмена'), submit));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      submit.disabled = true;
+      try {
+        const body = { email: email.value.trim() };
+        const pass = pw.querySelector('input').value;
+        if (pass) body.password = pass;
+        await api.post('/api/me/delete', body);
+        tokenStore.set('');
+        try { localStorage.removeItem('tq_user'); } catch { /* нет хранилища */ }
+        cacheClear();
+        state.user = null;
+        location.href = '/';
+      } catch (err) {
+        error.textContent = err.message;
+        submit.disabled = false;
+      }
+    });
+    overlay.append(form);
+    document.body.append(overlay);
+    email.focus();
+  }
+
   function openPasswordModal() {
     const oldPw = passwordField({ name: 'old', autocomplete: 'current-password', 'aria-label': 'Текущий пароль' });
     const newPw = passwordField({ name: 'new', autocomplete: 'new-password', 'aria-label': 'Новый пароль' });
@@ -857,7 +915,7 @@
 
   function openQuickMenu(anchor) {
     openMenu(anchor, [
-      { label: 'Быстрое создание', disabled: true, onClick() {} },
+      { label: 'Быстрое создание (клавиша C)', disabled: true, onClick() {} },
       '-',
       { label: 'Задача', onClick: () => openQuickCreate('task') },
       { label: 'Встреча', onClick: () => openQuickCreate('meeting') },
@@ -980,6 +1038,11 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && state.user && IN_PANEL) {
       e.preventDefault();
       openSearch();
+    }
+    // C: быстро создать задачу, если не печатаешь и нет открытых окон
+    if ((e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && state.user && IN_PANEL && !isTyping() && !document.querySelector('.overlay, .menu') && !location.hash.startsWith('#/reset') && !location.hash.startsWith('#/verify')) {
+      e.preventDefault();
+      openQuickCreate('task');
     }
   });
 
@@ -1280,7 +1343,7 @@
         h('div', { class: 'lf-brand' }, logoEl({ class: 'logo' }), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве. С AI-помощником, который знает ваши проекты.')),
         col('Продукт', [lf('Возможности', 'features'), lf('Проекты', 'kinds'), lf('Как начать', 'steps'), lf('Тарифы', 'pricing')]),
         col('Аккаунт', state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: '/login' }, 'Войти'), h('a', { href: '/register' }, 'Создать пространство')]),
-        col('Документы', [h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты'), h('a', { href: '/privacy' }, 'Конфиденциальность'), h('a', { href: '/terms' }, 'Условия')]),
+        col('Документы', [h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты'), h('a', { href: '/changelog' }, 'Что нового'), h('a', { href: '/status' }, 'Статус'), h('a', { href: '/privacy' }, 'Конфиденциальность'), h('a', { href: '/terms' }, 'Условия')]),
       ),
       h('div', { class: 'lf-bottom' }, h('span', null, `© ${new Date().getFullYear()} tasqly`), h('span', null, 'Сделано в Казахстане')),
     );
@@ -1364,7 +1427,7 @@
         ['Куки и локальное хранилище', ['Мы используем только необходимое: сессию входа, кеш последних экранов для быстрого открытия, выбранную тему и подсказки первого входа. Аналитических и рекламных скриптов нет.']],
         ['Что видят другие люди', ['Содержимое пространства видят его участники. Публичная ссылка на проект показывает только названия задач, колонки, метки, сроки и имена исполнителей без входа в аккаунт; описания, комментарии и email не показываются. Ссылку можно выключить в любой момент.']],
         ['Как долго мы храним данные', ['Пока существует твой аккаунт или пространство. Удалённое пространство стирается из базы сразу. Резервные копии базы хранятся ограниченное время (около двух недель) и затем удаляются автоматически.']],
-        ['Твои права', ['Ты можешь запросить, какие данные о тебе хранятся, исправить их, потребовать удаления аккаунта или отозвать согласие на обработку. Напиши нам в Telegram, мы ответим в разумный срок, не превышающий установленный законом. Удалить пространство целиком владелец может сам в кабинете.']],
+        ['Твои права', ['Ты можешь запросить, какие данные о тебе хранятся, исправить их, удалить аккаунт или отозвать согласие на обработку. Скачать свои данные одним файлом и удалить аккаунт можно самому в профиле, в разделе «Мои данные». Если нужна помощь, напиши нам в Telegram, мы ответим в разумный срок, не превышающий установленный законом. Удалить пространство целиком владелец может сам в кабинете.']],
         ['Безопасность', ['Соединение защищено HTTPS, пароли хешируются, доступ к пространству есть только у его участников. Ни один сервис не защищён на 100%, поэтому используй длинный уникальный пароль и не делись им.']],
         ['Изменения', ['Если политика изменится, мы обновим эту страницу и дату редакции. О существенных изменениях сообщим в сервисе или по почте.']],
       ],
@@ -1380,17 +1443,50 @@
         ['AI-помощник', ['Ответы AI создаются автоматически и могут быть неточными. Проверяй важные решения самостоятельно. Для AI действует суточный лимит запросов.']],
         ['Доступность и резервные копии', ['Мы стараемся, чтобы сервис работал без перебоев и делаем резервные копии, но не гарантируем бесперебойную работу и сохранность данных. Важные файлы храни и у себя.']],
         ['Ответственность', ['Сервис предоставляется «как есть». В пределах, разрешённых законом, мы не отвечаем за косвенные убытки, потерю данных и упущенную выгоду, возникшие из-за использования или невозможности использовать сервис.']],
-        ['Прекращение использования', ['Ты можешь в любой момент удалить своё пространство и перестать пользоваться сервисом, а удаление аккаунта можно запросить через контакты. Мы можем ограничить или заблокировать аккаунт при нарушении этих правил.']],
+        ['Прекращение использования', ['Ты можешь в любой момент удалить своё пространство и перестать пользоваться сервисом, а удалить аккаунт можно самому в профиле. Мы можем ограничить или заблокировать аккаунт при нарушении этих правил.']],
         ['Право и споры', ['К этим условиям применяется законодательство Республики Казахстан. Сначала постараемся решить любой спор переговорами: напиши нам.']],
         ['Изменения условий', ['Мы можем обновлять условия, актуальная редакция всегда на этой странице. Если продолжаешь пользоваться сервисом после обновления, это означает согласие с новой редакцией.']],
       ],
     },
   };
 
+  // «что нового»: только то, что уже работает; даты не выдумываем, всё сделано в ноябре 2026
+  const CHANGELOG = [
+    { title: 'Данные и безопасность', date: 'Ноябрь 2026', items: [
+      ['Подтверждение почты.', 'Письмо со ссылкой после регистрации, баннер в кабинете и кнопка в профиле.'],
+      ['Журнал действий.', 'Владелец и администраторы видят, кто удалял проекты, задачи и файлы, приглашал и убирал людей, менял роли.'],
+      ['Скачать данные и удалить аккаунт.', 'В профиле: один файл со всеми проектами и задачами, удаление с подтверждением.'],
+      ['Быстрое создание.', 'Клавиша C открывает создание задачи из любого места кабинета.'],
+      ['«Что нового» и «Статус».', 'Эти две страницы.'],
+    ] },
+    { title: 'Команда и доступ', date: 'Ноябрь 2026', items: [
+      ['Роли участников.', 'Владелец, администратор, участник, наблюдатель и свои роли с цветами.'],
+      ['Восстановление пароля по почте.', 'Одноразовая ссылка на час.'],
+      ['История изменений задачи.', 'Кто и что менял: название, исполнитель, срок, приоритет, метки.'],
+      ['Резервные копии.', 'Ежедневный снимок базы, хранится 14 дней.'],
+      ['Политика конфиденциальности и условия.', 'Настоящие тексты вместо заглушек.'],
+      ['Диск пространства 40 МБ.', 'Вдвое больше прежнего, до 200 файлов.'],
+    ] },
+    { title: 'Удобство работы', date: 'Ноябрь 2026', items: [
+      ['Поиск Ctrl+K.', 'По задачам, заметкам, файлам и проектам во всех пространствах.'],
+      ['Публичная ссылка на проект.', 'Только просмотр, включается и выключается одной кнопкой.'],
+      ['Голосовая задача.', 'Надиктуй задачи, они расшифруются в текст и предложатся списком.'],
+      ['Повторяющиеся задачи.', 'Каждый день, неделю или месяц.'],
+      ['Упоминания @имя.', 'В комментариях, с уведомлением во входящих.'],
+      ['Пробный период по кнопке.', '5 дней «Команды» включаются после регистрации, тариф привязан к аккаунту.'],
+    ] },
+    { title: 'Первый запуск', date: 'Ноябрь 2026', items: [
+      ['Задачи и доски', 'трёх видов проектов, метки, подзадачи, сроки, приоритеты.'],
+      ['Учёт времени, заметки, чат и диск', 'в одном пространстве.'],
+      ['AI-помощник:', 'подсказки, разбор больших задач на шаги.'],
+      ['Приглашение по ссылке, профиль, светлая и тёмная тема.', ''],
+    ] },
+  ];
+
   // ---------- отдельные публичные страницы: /pricing, /contacts, /privacy, /terms ----------
   function viewPublicPage(kind) {
     destroyDock();
-    const titles = { pricing: 'Тарифы', contacts: 'Контакты', privacy: 'Политика конфиденциальности', terms: 'Условия использования' };
+    const titles = { pricing: 'Тарифы', contacts: 'Контакты', privacy: 'Политика конфиденциальности', terms: 'Условия использования', changelog: 'Что нового', status: 'Статус сервиса' };
     document.title = `${titles[kind]} · tasqly`;
     const cta = state.user ? h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет') : h('a', { class: 'btn small nav-cta', href: '/register' }, 'Начать сейчас');
     const nav = h('header', { class: 'land-nav' }, logoEl(), h('span', { class: 'grow' }),
@@ -1399,7 +1495,7 @@
     const foot = h('footer', { class: 'land-foot' },
       h('div', { class: 'lf-in' },
         h('div', { class: 'lf-brand' }, logoEl(), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве.')),
-        h('div', { class: 'lf-col' }, h('b', null, 'Продукт'), h('a', { href: '/' }, 'Главная'), h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты')),
+        h('div', { class: 'lf-col' }, h('b', null, 'Продукт'), h('a', { href: '/' }, 'Главная'), h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты'), h('a', { href: '/changelog' }, 'Что нового'), h('a', { href: '/status' }, 'Статус')),
         h('div', { class: 'lf-col' }, h('b', null, 'Аккаунт'), ...(state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: '/login' }, 'Войти'), h('a', { href: '/register' }, 'Создать пространство')])),
         h('div', { class: 'lf-col' }, h('b', null, 'Документы'), h('a', { href: '/privacy' }, 'Конфиденциальность'), h('a', { href: '/terms' }, 'Условия')),
       ),
@@ -1443,6 +1539,39 @@
           h('p', null, 'Регистрация занимает меньше минуты.'),
           h('a', { class: 'btn', href: '/register' }, 'Создать пространство')),
       ];
+    } else if (kind === 'changelog') {
+      body = [
+        h('h1', null, 'Что нового'),
+        h('p', { class: 'pg-lead' }, 'Что появилось в tasqly. Всё, что тут перечислено, уже работает.'),
+        ...CHANGELOG.map((rel) => h('section', { class: 'cl-rel' },
+          h('h2', null, rel.title),
+          h('div', { class: 'cl-date' }, rel.date),
+          h('ul', null, rel.items.map((it) => h('li', null, h('b', null, it[0]), it[1] ? ` ${it[1]}` : ''))))),
+      ];
+    } else if (kind === 'status') {
+      const grid = h('div', { class: 'st-grid' }, h('div', { class: 'sub' }, 'Проверяем…'));
+      const head = h('div', { class: 'st-head' }, h('span', { class: 'st-dot' }), h('b', null, 'Проверяем…'));
+      body = [
+        h('h1', null, 'Статус сервиса'),
+        h('p', { class: 'pg-lead' }, 'Это живая проверка: страница спрашивает сервис прямо сейчас. Истории сбоев пока нет.'),
+        head,
+        grid,
+      ];
+      const row = (name, good, text) => h('div', { class: `st-item ${good === null ? 'off' : good ? 'ok' : 'bad'}` }, h('span', { class: 'st-dot' }), h('div', null, h('b', null, name), h('span', null, text)));
+      fetch(`${API_BASE}/api/status`, { cache: 'no-store' }).then((r) => r.json()).then((st) => {
+        head.className = `st-head ${st.ok ? 'ok' : 'bad'}`;
+        head.replaceChildren(h('span', { class: 'st-dot' }), h('b', null, st.ok ? 'Всё работает' : 'Есть проблемы'), h('span', null, `проверено ${new Date(st.time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`));
+        grid.replaceChildren(
+          row('Сервис и база данных', st.db, st.db ? `отвечает за ${st.db_ms} мс` : 'не отвечает'),
+          row('Резервные копии', st.backup ? true : null, st.backup ? `последняя: ${new Date(st.backup + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}, хранятся 14 дней` : 'первая копия появится ночью'),
+          row('AI-помощник', st.ai, st.ai ? 'подключён' : 'недоступен'),
+          row('Письма (сброс пароля, подтверждение)', st.mail ? true : null, st.mail ? 'отправка настроена' : 'отправка пока не настроена'),
+        );
+      }).catch(() => {
+        head.className = 'st-head bad';
+        head.replaceChildren(h('span', { class: 'st-dot' }), h('b', null, 'Не удалось проверить'), h('span', null, 'сервис не ответил, попробуй обновить страницу'));
+        grid.replaceChildren();
+      });
     } else if (kind === 'contacts') {
       body = [
         h('h1', null, 'Контакты'),
@@ -1528,6 +1657,14 @@
     const error = h('div', { class: 'error' });
     const form = h('form', { novalidate: true });
     const tabs = h('div', { class: 'seg' });
+    // вход через Google показываем, только если на сервере заданы ключи
+    const googleBox = h('div', { class: 'g-box' });
+    api.get('/api/config').then((c) => {
+      if (!c.google) return;
+      googleBox.append(h('div', { class: 'or-line' }, h('span', null, 'или')), h('a', { class: 'btn ghost g-btn', href: `${API_BASE}/api/auth/google/start` }, h('span', { class: 'g-mark', 'aria-hidden': 'true' }, 'G'), 'Продолжить с Google'));
+    }).catch(() => {});
+    const gErr = external ? new URLSearchParams(location.search).get('google') : null;
+    if (gErr) queueMicrotask(() => { error.textContent = { cancel: 'Вход через Google отменён', email: 'Google не подтвердил твою почту', error: 'Не получилось войти через Google, попробуй ещё раз' }[gErr] || ''; });
 
     function paint() {
       tabs.replaceChildren(
@@ -1575,7 +1712,7 @@
         { class: 'auth' },
         logoEl(),
         h('div', { class: 'tag' }, opts.invited ? 'Тебя пригласили в пространство. Создай аккаунт или войди, и ты сразу попадёшь в него' : mode === 'register' ? 'Создай аккаунт и первое пространство' : 'Войди в свой кабинет'),
-        h('div', { class: 'card' }, tabs, form),
+        h('div', { class: 'card' }, tabs, form, googleBox),
         h('a', { class: 'auth-back', href: '/' }, '← О сервисе'),
       ),
     );
@@ -1649,6 +1786,37 @@
           i === current && act ? h('button', { class: 'btn small', onclick: act }, label) : null))));
   }
 
+  // баннер «подтверди почту»: пока адрес не подтверждён (старые аккаунты тоже), ничего не блокирует
+  function verifyBanner() {
+    if (!state.user || state.user.email_verified !== false) return null;
+    const btn = h('button', { class: 'btn small ghost' }, 'Отправить письмо');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api.post('/api/me/verify/send');
+        toast('Письмо отправлено. Проверь почту, в том числе спам');
+      } catch (e) {
+        toast(e.message);
+        btn.disabled = false;
+      }
+    });
+    return h('div', { class: 'trial-banner verify-banner' }, h('span', { class: 'trial-dot' }), h('div', null, h('b', null, 'Подтверди почту'), h('span', null, `Ссылка придёт на ${state.user.email}. Так мы убедимся, что адрес твой.`)), btn);
+  }
+
+  // переход по ссылке из письма
+  async function viewVerify(token) {
+    document.title = 'Подтверждение почты · tasqly';
+    const card = h('div', { class: 'card' }, h('p', { class: 'sub' }, 'Подтверждаем…'));
+    render(h('div', { class: 'auth' }, logoEl(), card));
+    try {
+      await api.post('/api/auth/verify', { token });
+      if (state.user) { state.user = { ...state.user, email_verified: true }; saveUser(); }
+      card.replaceChildren(h('h1', { style: 'font-size:20px;margin:0 0 8px' }, 'Почта подтверждена'), h('p', { class: 'sub' }, 'Спасибо! Можно продолжать работу.'), h('a', { class: 'btn', href: state.user ? '#/' : '#/login' }, state.user ? 'В кабинет' : 'Войти'));
+    } catch (e) {
+      card.replaceChildren(h('h1', { style: 'font-size:20px;margin:0 0 8px' }, 'Ссылка не сработала'), h('p', { class: 'sub' }, e.message), h('a', { class: 'btn', href: '#/' }, 'В кабинет'));
+    }
+  }
+
   async function viewHome() {
     document.title = 'tasqly';
     const warm = cacheGet('/api/workspaces');
@@ -1691,6 +1859,7 @@
       h(
         'div',
         { class: 'container home' },
+        verifyBanner(),
         (() => {
           const t = trialState();
           return t && t.active && state.user.plan === 'start'
@@ -1775,7 +1944,10 @@
           h('span', { class: 'prof-ava', style: `background:${AVATAR_COLORS[hue % AVATAR_COLORS.length]}` }, user.name.trim().charAt(0).toUpperCase()),
           h('div', { class: 'prof-id' },
             h('div', { class: 'prof-edit' }, nameInput, saveBtn),
-            h('div', { class: 'prof-mail' }, user.email),
+            h('div', { class: 'prof-mail' }, user.email, ' ', user.email_verified ? h('span', { class: 'ok-chip' }, 'подтверждена') : h('button', { class: 'link-btn', style: 'margin:0;display:inline', onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              try { await api.post('/api/me/verify/send'); toast('Письмо отправлено. Проверь почту, в том числе спам'); } catch (er) { toast(er.message); e.currentTarget.disabled = false; }
+            } }, 'подтвердить')),
             since ? h('div', { class: 'prof-since' }, `В tasqly с ${since}`) : null)),
         h('div', { class: 'home-stats' }, tile(workspaces.length, plural(workspaces.length, 'пространство', 'пространства', 'пространств')), tile(sum('projects'), plural(sum('projects'), 'проект', 'проекта', 'проектов')), tile(sum('my_open'), plural(sum('my_open'), 'моя открытая задача', 'моих открытых задачи', 'моих открытых задач'))),
         (() => {
@@ -1796,6 +1968,10 @@
           h('h2', null, 'Безопасность'),
           row('Пароль', 'Минимум 8 символов', h('button', { class: 'btn ghost small', onclick: openPasswordModal }, 'Сменить')),
           row('Устройства', `${usage.devices} ${plural(usage.devices, 'активная сессия', 'активные сессии', 'активных сессий')}`, othersBtn)),
+        h('div', { class: 'prof-card' },
+          h('h2', null, 'Мои данные'),
+          row('Скачать данные', 'Проекты, задачи, заметки и твои комментарии одним файлом', h('button', { class: 'btn ghost small', onclick: exportData }, 'Скачать')),
+          row('Удалить аккаунт', 'Безвозвратно: аккаунт и пространства, где ты один', h('button', { class: 'btn danger small', onclick: openDeleteAccount }, 'Удалить'))),
         h('div', { class: 'prof-card' }, row('Выйти из аккаунта', 'На этом устройстве', h('button', { class: 'btn danger small', onclick: logout }, 'Выйти'))),
       ),
     );
@@ -1810,15 +1986,17 @@
     ['chat', 'Чат'],
     ['files', 'Диск'],
     ['ai', 'AI'],
+    ['audit', 'Журнал'],
   ];
 
   async function viewWorkspace(id, tab = 'projects') {
     if (!WS_TABS.some(([k]) => k === tab)) tab = 'projects';
     const data = await api.fast(`/api/workspaces/${id}`);
     const { workspace } = data;
+    if (tab === 'audit' && !isAdmin(workspace.role)) tab = 'projects';
     document.title = `${workspace.name} · tasqly`;
     setAiContext(id, '', `пространство «${workspace.name}»`);
-    const panel = { projects: panelProjects, notes: panelNotes, time: panelTime, chat: panelChat, files: panelFiles, ai: panelAI }[tab](id, data);
+    const panel = { projects: panelProjects, notes: panelNotes, time: panelTime, chat: panelChat, files: panelFiles, ai: panelAI, audit: panelAudit }[tab](id, data);
 
     render(
       topbar([{ label: 'Пространства', href: '#/' }, { label: workspace.name }]),
@@ -1826,7 +2004,7 @@
         'div',
         { class: `container${tab === 'projects' ? '' : ' wide'}` },
         h('h1', null, workspace.name),
-        h('nav', { class: 'ws-tabs', 'aria-label': 'Разделы пространства' }, WS_TABS.map(([k, label]) => h('a', { class: `ws-tab${k === tab ? ' active' : ''}`, href: k === 'projects' ? `#/w/${id}` : `#/w/${id}/${k}` }, label))),
+        h('nav', { class: 'ws-tabs', 'aria-label': 'Разделы пространства' }, WS_TABS.filter(([k]) => k !== 'audit' || isAdmin(workspace.role)).map(([k, label]) => h('a', { class: `ws-tab${k === tab ? ' active' : ''}`, href: k === 'projects' ? `#/w/${id}` : `#/w/${id}/${k}` }, label))),
         panel,
       ),
     );
@@ -2440,6 +2618,52 @@
     if (/\.(xlsx?|csv|ods)$/i.test(name)) return '📊';
     if (/\.(zip|rar|7z|gz)$/i.test(name)) return '🗜';
     return '📄';
+  }
+
+  // журнал действий: владелец и администраторы видят, кто что сделал
+  const AUDIT_TEXT = {
+    project_created: (d) => `Создан проект «${d.name}»`,
+    project_renamed: (d) => `Проект «${d.from}» переименован в «${d.to}»`,
+    project_deleted: (d) => `Удалён проект «${d.name}»`,
+    share_on: (d) => `Включена публичная ссылка на проект «${d.name}»`,
+    share_off: (d) => `Выключена публичная ссылка на проект «${d.name}»`,
+    task_deleted: (d) => `Удалена задача «${d.title}»`,
+    note_deleted: (d) => `Удалена заметка «${d.title || 'без названия'}»`,
+    file_deleted: (d) => `Удалён файл «${d.name}»`,
+    member_joined: (d) => `Новый участник: ${d.name}`,
+    member_removed: (d) => `Участник ${d.name} убран из пространства`,
+    member_left: (d) => `Участник ${d.name} покинул пространство`,
+    member_role: (d) => `Участнику ${d.name} назначена роль «${d.to}»`,
+    role_created: (d) => `Создана роль «${d.name}»`,
+    role_updated: (d) => `Изменена роль «${d.name}»`,
+    role_deleted: (d) => `Удалена роль «${d.name}»`,
+  };
+  function panelAudit(id) {
+    const list = h('div', { class: 'card flush audit-list' }, h('div', { class: 'empty' }, 'Загрузка…'));
+    const moreBtn = h('button', { class: 'btn ghost small', hidden: true }, 'Показать ещё');
+    let events = [];
+    let before = '';
+    const paint = (more) => {
+      list.replaceChildren(...(events.length
+        ? events.map((e) => h('div', { class: 'audit-row' }, h('span', { class: 'audit-when' }, formatDateTime(e.created_at)), h('span', { class: 'audit-who' }, e.user_name || 'Удалённый аккаунт'), h('span', { class: 'audit-what' }, (AUDIT_TEXT[e.kind] || (() => e.kind))(e.detail || {}))))
+        : [h('div', { class: 'empty' }, 'Пока пусто. Здесь появятся удаления, приглашения, смена ролей и публичные ссылки.')]));
+      moreBtn.hidden = !more;
+    };
+    const load = async () => {
+      moreBtn.disabled = true;
+      try {
+        const r = await api.get(`/api/workspaces/${id}/audit${before}`);
+        events = events.concat(r.events);
+        before = events.length ? `?before=${events[events.length - 1].created_at}` : '';
+        paint(r.more);
+      } catch (e) {
+        list.replaceChildren(h('div', { class: 'empty' }, e.message));
+      }
+      moreBtn.disabled = false;
+    };
+    moreBtn.addEventListener('click', load);
+    load();
+    return h('div', null, h('p', { class: 'sub', style: 'margin:0 0 12px' }, 'Журнал виден владельцу и администраторам. Он показывает удаления, приглашения, смену ролей и публичные ссылки.'), list, h('div', { style: 'margin-top:12px' }, moreBtn));
   }
 
   function panelFiles(id) {
@@ -3749,13 +3973,15 @@
         if (state.user) return location.replace(PANEL);
         return viewAuth(path === '/login' ? 'login' : 'register');
       }
-      if (['/pricing', '/contacts', '/privacy', '/terms'].includes(path)) return viewPublicPage(path.slice(1));
+      if (['/pricing', '/contacts', '/privacy', '/terms', '/changelog', '/status'].includes(path)) return viewPublicPage(path.slice(1));
       return viewLanding();
     }
     const shareHash = hash.match(/^#\/share\/([0-9a-f]{32})$/);
     if (shareHash) return viewShared(shareHash[1]);
     const resetHash = hash.match(/^#\/reset\/([0-9a-f]{64})$/);
     if (resetHash) return viewReset(resetHash[1]);
+    const verifyHash = hash.match(/^#\/verify\/([0-9a-f]{64})$/);
+    if (verifyHash) return viewVerify(verifyHash[1]);
     const joinHash = hash.match(/^#\/join\/([A-Za-z0-9]{3,20})$/);
     if (!state.user) {
       if (joinHash) {

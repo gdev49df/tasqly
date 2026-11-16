@@ -636,6 +636,79 @@ ok('пробный период: включается кнопкой, один �
 }
 ok('тариф «Старт»: в пространстве не больше 3 участников');
 
+
+// ---------- подтверждение почты, экспорт, удаление, журнал, статус ----------
+
+{
+  const c = client();
+  const reg = await c('POST', '/api/auth/register', { email: `ver${run}@test.dev`, name: 'Вера', password: 'password123' });
+  assert.equal(reg.data.user.email_verified, false);
+  assert.ok(reg.data.debug_verify_token, 'в тестовом режиме токен подтверждения возвращается');
+  assert.equal((await c('POST', '/api/auth/verify', { token: 'f'.repeat(64) })).status, 400);
+  assert.equal((await c('POST', '/api/me/verify/send', {})).status, 429, 'письмо не чаще раза в минуту');
+  assert.equal((await client()('POST', '/api/auth/verify', { token: reg.data.debug_verify_token })).status, 200);
+  assert.equal((await c('GET', '/api/me')).data.user.email_verified, true);
+  assert.equal((await client()('POST', '/api/auth/verify', { token: reg.data.debug_verify_token })).status, 400, 'ссылка одноразовая');
+  assert.equal((await c('POST', '/api/me/verify/send', {})).status, 409, 'уже подтверждена');
+}
+ok('подтверждение почты: ссылка одноразовая, письмо не чаще раза в минуту');
+
+{
+  const owner = client();
+  await owner('POST', '/api/auth/register', { email: `own${run}@test.dev`, name: 'Олег', password: 'password123' });
+  const w = (await owner('POST', '/api/workspaces', { name: 'журнал' })).data.workspace;
+  const p = (await owner('POST', `/api/workspaces/${w.id}/projects`, { name: 'Проект А' })).data.project;
+  await owner('PATCH', `/api/projects/${p.id}`, { name: 'Проект Б' });
+  await owner('POST', `/api/projects/${p.id}/share`, {});
+  await owner('DELETE', `/api/projects/${p.id}/share`, {});
+  const p2 = (await owner('POST', `/api/workspaces/${w.id}/projects`, { name: 'Лишний' })).data.project;
+  await owner('DELETE', `/api/projects/${p2.id}`, {});
+  const code = (await owner('GET', `/api/workspaces/${w.id}`)).data.workspace.invite_code;
+  const guest = client();
+  const g = await guest('POST', '/api/auth/register', { email: `gst${run}@test.dev`, name: 'Гость', password: 'password123' });
+  await guest('POST', '/api/workspaces/join', { code });
+  assert.equal((await guest('GET', `/api/workspaces/${w.id}/audit`)).status, 403, 'журнал только для владельца и администратора');
+  await owner('PATCH', `/api/workspaces/${w.id}/members/${g.data.user.id}`, { level: 'viewer' });
+  await owner('DELETE', `/api/workspaces/${w.id}/members/${g.data.user.id}`, {});
+  const log = await owner('GET', `/api/workspaces/${w.id}/audit`);
+  assert.equal(log.status, 200);
+  const kinds = log.data.events.map((e) => e.kind);
+  for (const k of ['project_created', 'project_renamed', 'share_on', 'share_off', 'project_deleted', 'member_joined', 'member_role', 'member_removed']) assert.ok(kinds.includes(k), `в журнале нет ${k}`);
+  assert.equal(log.data.events.find((e) => e.kind === 'project_deleted').detail.name, 'Лишний');
+  assert.equal(log.data.events[0].user_name, 'Олег');
+
+  // экспорт
+  const ex = await owner('GET', '/api/me/export');
+  assert.equal(ex.status, 200);
+  assert.equal(ex.data.user.email, `own${run}@test.dev`);
+  assert.ok(ex.data.workspaces.some((x) => x.id === w.id) && ex.data.projects.some((x) => x.id === p.id));
+  assert.ok(!JSON.stringify(ex.data).includes('pass_hash'));
+
+  // удаление аккаунта: нужен email и пароль; пространство с участниками не удаляется молча
+  const g2 = client();
+  await g2('POST', '/api/auth/register', { email: `gs2${run}@test.dev`, name: 'Гость2', password: 'password123' });
+  await g2('POST', '/api/workspaces/join', { code });
+  assert.equal((await owner('POST', '/api/me/delete', { email: 'other@test.dev', password: 'password123' })).status, 400);
+  assert.equal((await owner('POST', '/api/me/delete', { email: `own${run}@test.dev`, password: 'wrongpass' })).status, 403);
+  assert.equal((await owner('POST', '/api/me/delete', { email: `own${run}@test.dev`, password: 'password123' })).status, 409);
+  await owner('DELETE', `/api/workspaces/${w.id}`, {});
+  assert.equal((await owner('POST', '/api/me/delete', { email: `own${run}@test.dev`, password: 'password123' })).status, 200);
+  assert.equal((await owner('GET', '/api/me')).status, 401);
+  assert.equal((await client()('POST', '/api/auth/login', { email: `own${run}@test.dev`, password: 'password123' })).status, 401);
+}
+ok('журнал действий, экспорт данных и удаление аккаунта');
+
+{
+  const st = await client()('GET', '/api/status');
+  assert.equal(st.status, 200);
+  assert.equal(st.data.ok, true);
+  assert.ok(typeof st.data.db_ms === 'number');
+  const cfg = await client()('GET', '/api/config');
+  assert.equal(cfg.data.google, false);
+  assert.equal((await fetch(BASE + '/api/auth/google/start', { redirect: 'manual' })).status, 404, 'без ключей Google вход выключен');
+}
+ok('статус сервиса и конфиг: Google выключен без ключей');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

@@ -100,7 +100,7 @@ async function currentUser(req, env) {
   const token = getToken(req);
   if (!token) return null;
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.created_at, u.trial_ends_at, u.plan FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.email, u.name, u.created_at, u.trial_ends_at, u.plan, u.email_verified_at FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )
     .bind(await sha256(token), now())
@@ -112,7 +112,7 @@ async function currentUser(req, env) {
 function effectivePlan(u) {
   return u.plan === 'start' && u.trial_ends_at && u.trial_ends_at > now() ? 'team' : u.plan || 'start';
 }
-const shapeUser = (u) => ({ id: u.id, email: u.email, name: u.name, created_at: u.created_at, trial_ends_at: u.trial_ends_at || null, plan: u.plan || 'start', effective_plan: effectivePlan(u) });
+const shapeUser = (u) => ({ id: u.id, email: u.email, name: u.name, created_at: u.created_at, trial_ends_at: u.trial_ends_at || null, plan: u.plan || 'start', effective_plan: effectivePlan(u), email_verified: !!u.email_verified_at });
 const PLAN_MEMBERS = { start: 3, team: 30, business: Infinity };
 
 async function createSession(env, userId) {
@@ -349,6 +349,17 @@ async function logEvent(env, taskId, userId, kind, detail) {
   }
 }
 
+// журнал действий пространства (виден владельцу и администраторам); ошибки журнала не ломают действие
+async function audit(env, workspaceId, userId, kind, detail) {
+  try {
+    await env.DB.prepare('INSERT INTO audit_log (id, workspace_id, user_id, kind, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(newId(), workspaceId, userId, kind, detail === undefined ? null : JSON.stringify(detail), now())
+      .run();
+  } catch {
+    /* журнал не должен ломать действие */
+  }
+}
+
 const shapeTask = (row) => ({ ...row, label_ids: row.label_ids ? row.label_ids.split(',') : [] });
 
 async function loadTask(env, taskId) {
@@ -374,7 +385,7 @@ const route = (method, pattern, handler, { auth = true } = {}) => {
 route(
   'POST',
   '/api/auth/register',
-  async ({ env, body }) => {
+  async ({ env, req, body }) => {
     const email = cleanString(body.email, 'email', { max: 120 }).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'неверный email');
     const name = cleanString(body.name, 'имя', { max: 60 });
@@ -392,7 +403,10 @@ route(
       .run();
 
     const { token, cookie } = await createSession(env, id);
-    return json({ user: shapeUser({ id, email, name, created_at: now(), trial_ends_at: null, plan: 'start' }), token }, 201, { 'set-cookie': cookie });
+    const out = { user: shapeUser({ id, email, name, created_at: now(), trial_ends_at: null, plan: 'start' }), token };
+    const vt = await sendVerification(env, req, { id, email, name });
+    if (env.MAIL_MOCK && vt.token) out.debug_verify_token = vt.token;
+    return json(out, 201, { 'set-cookie': cookie });
   },
   { auth: false },
 );
@@ -403,7 +417,7 @@ route(
   async ({ env, body }) => {
     const email = cleanString(body.email, 'email', { max: 120 }).toLowerCase();
     const password = cleanString(body.password, 'пароль', { min: 1, max: 200 });
-    const user = await env.DB.prepare('SELECT id, email, name, created_at, trial_ends_at, plan, pass_hash, pass_salt FROM users WHERE email = ?')
+    const user = await env.DB.prepare('SELECT id, email, name, created_at, trial_ends_at, plan, email_verified_at, pass_hash, pass_salt FROM users WHERE email = ?')
       .bind(email)
       .first();
     // хешируем в любом случае, чтобы время ответа не выдавало существование email
@@ -540,11 +554,249 @@ route(
     if (!row || row.expires_at < now()) fail(400, 'ссылка недействительна или устарела, запроси новую');
     const { hash, salt } = await hashPassword(password);
     await env.DB.batch([
-      env.DB.prepare('UPDATE users SET pass_hash = ?, pass_salt = ? WHERE id = ?').bind(hash, salt, row.user_id),
+      env.DB.prepare('UPDATE users SET pass_hash = ?, pass_salt = ?, email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?').bind(hash, salt, now(), row.user_id),
       env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(row.user_id),
       env.DB.prepare('DELETE FROM password_resets WHERE user_id = ?').bind(row.user_id),
     ]);
     return json({ ok: true });
+  },
+  { auth: false },
+);
+
+// ---------- подтверждение email ----------
+
+// письмо со ссылкой подтверждения; не чаще раза в минуту на аккаунт
+async function sendVerification(env, req, u) {
+  const last = await env.DB.prepare('SELECT MAX(created_at) AS t FROM email_verifications WHERE user_id = ?').bind(u.id).first();
+  if (last.t && now() - last.t < 60_000) return { token: null, sent: false, limited: true };
+  const token = randomHex(32);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM email_verifications WHERE user_id = ? OR expires_at < ?').bind(u.id, now()),
+    env.DB.prepare('INSERT INTO email_verifications (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)').bind(await sha256(token), u.id, now() + 48 * 3600_000, now()),
+  ]);
+  if (env.MAIL_MOCK) return { token, sent: true };
+  const link = `${new URL(req.url).origin}/panel/#/verify/${token}`;
+  const sent = await sendMail(
+    env,
+    u.email,
+    'Подтверди почту в tasqly',
+    `<div style="font-family:system-ui,sans-serif;max-width:480px;line-height:1.5;color:#111"><h2 style="margin:0 0 12px">Подтверди почту</h2><p>Привет, ${escHtml(u.name)}! Нажми на кнопку, чтобы подтвердить адрес. Ссылка действует двое суток.</p><p><a href="${link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600">Подтвердить почту</a></p><p style="color:#666;font-size:13px">Если ты не регистрировался в tasqly, просто проигнорируй письмо.</p></div>`,
+  );
+  return { token, sent };
+}
+
+route('POST', '/api/me/verify/send', async ({ env, req, user }) => {
+  if (user.email_verified) fail(409, 'почта уже подтверждена');
+  const r = await sendVerification(env, req, user);
+  if (r.limited) fail(429, 'письмо уже отправлено, подожди минуту и попробуй снова');
+  if (!r.sent) fail(503, 'отправка почты пока не настроена, попробуй позже');
+  return json(env.MAIL_MOCK ? { ok: true, debug_token: r.token } : { ok: true });
+});
+
+route(
+  'POST',
+  '/api/auth/verify',
+  async ({ env, body }) => {
+    const token = cleanString(body.token, 'токен', { max: 100 });
+    const row = await env.DB.prepare('SELECT user_id, expires_at FROM email_verifications WHERE token_hash = ?').bind(await sha256(token)).first();
+    if (!row || row.expires_at < now()) fail(400, 'ссылка недействительна или устарела, запроси новое письмо в кабинете');
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?').bind(now(), row.user_id),
+      env.DB.prepare('DELETE FROM email_verifications WHERE user_id = ?').bind(row.user_id),
+    ]);
+    return json({ ok: true });
+  },
+  { auth: false },
+);
+
+// ---------- экспорт данных и удаление аккаунта ----------
+
+route('GET', '/api/me/export', async ({ env, user }) => {
+  const mine = 'IN (SELECT workspace_id FROM members WHERE user_id = ?1)';
+  const projs = `IN (SELECT id FROM projects WHERE workspace_id ${mine})`;
+  const tasksIn = `IN (SELECT t.id FROM tasks t JOIN projects p ON p.id = t.project_id WHERE p.workspace_id ${mine})`;
+  const q = (sql) => env.DB.prepare(sql).bind(user.id).all().then((r) => r.results);
+  const [workspaces, projects, columns, tasks, labels, task_labels, checklist, comments, notes, time_entries, messages, files] = await Promise.all([
+    q(`SELECT w.id, w.name, m.role, m.joined_at, w.created_at FROM members m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ?1`),
+    q(`SELECT id, workspace_id, name, kind, created_at FROM projects WHERE workspace_id ${mine}`),
+    q(`SELECT id, project_id, name, position, is_done FROM columns WHERE project_id ${projs}`),
+    q(`SELECT * FROM tasks WHERE project_id ${projs}`),
+    q(`SELECT id, workspace_id, name, color FROM labels WHERE workspace_id ${mine}`),
+    q(`SELECT task_id, label_id FROM task_labels WHERE task_id ${tasksIn}`),
+    q(`SELECT id, task_id, text, done FROM checklist_items WHERE task_id ${tasksIn}`),
+    q(`SELECT id, task_id, body, created_at FROM comments WHERE user_id = ?1 AND task_id ${tasksIn}`),
+    q(`SELECT id, workspace_id, title, body, created_at, updated_at FROM notes WHERE workspace_id ${mine}`),
+    q(`SELECT * FROM time_entries WHERE user_id = ?1`),
+    q(`SELECT id, workspace_id, body, created_at FROM messages WHERE user_id = ?1`),
+    q(`SELECT id, workspace_id, name, mime, size, created_at FROM files WHERE workspace_id ${mine}`),
+  ]);
+  const data = {
+    exported_at: new Date().toISOString(),
+    note: 'проекты, задачи, заметки и метки включены целиком, комментарии, время и сообщения чата только твои, файлы диска только списком',
+    user: { id: user.id, email: user.email, name: user.name, created_at: user.created_at, plan: user.plan },
+    workspaces, projects, columns, tasks, labels, task_labels, checklist, comments, notes, time_entries, messages, files,
+  };
+  return new Response(JSON.stringify(data, null, 2), {
+    headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': 'attachment; filename="tasqly-export.json"', 'cache-control': 'no-store' },
+  });
+});
+
+// удаление аккаунта: нужен пароль (для входа через Google без пароля достаточно набрать email)
+route('POST', '/api/me/delete', async ({ env, user, body }) => {
+  const confirm = cleanString(body.email, 'email', { max: 120 }).toLowerCase();
+  if (confirm !== user.email) fail(400, 'email не совпадает: набери адрес своей почты, чтобы подтвердить удаление');
+  const row = await env.DB.prepare('SELECT pass_hash, pass_salt, google_id FROM users WHERE id = ?').bind(user.id).first();
+  if (!row.google_id || body.password) {
+    const password = cleanString(body.password, 'пароль', { min: 1, max: 200 });
+    const { hash } = await hashPassword(password, row.pass_salt);
+    if (!safeEqual(hash, row.pass_hash)) fail(403, 'пароль неверный');
+  }
+  // пространства с другими участниками не удаляем молча: человек должен решить сам
+  const shared = await env.DB.prepare(
+    `SELECT w.name FROM workspaces w WHERE w.owner_id = ? AND (SELECT COUNT(*) FROM members m WHERE m.workspace_id = w.id) > 1`,
+  )
+    .bind(user.id)
+    .all();
+  if (shared.results.length) fail(409, `у тебя есть пространства с другими участниками: ${shared.results.map((w) => `«${w.name}»`).join(', ')}. Удали их или убери участников, потом повтори`);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM workspaces WHERE owner_id = ?').bind(user.id),
+    env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
+  ]);
+  return json({ ok: true }, 200, { 'set-cookie': sessionCookie('', 0) });
+});
+
+// ---------- журнал действий пространства ----------
+
+route('GET', '/api/workspaces/:id/audit', async ({ env, user, params, req }) => {
+  await requireAdmin(env, params.id, user.id);
+  const before = Number(new URL(req.url).searchParams.get('before')) || Date.now() + 1;
+  const { results } = await env.DB.prepare(
+    `SELECT a.id, a.kind, a.detail, a.created_at, a.user_id, u.name AS user_name FROM audit_log a
+     LEFT JOIN users u ON u.id = a.user_id WHERE a.workspace_id = ? AND a.created_at < ? ORDER BY a.created_at DESC LIMIT 51`,
+  )
+    .bind(params.id, before)
+    .all();
+  const more = results.length > 50;
+  return json({ events: results.slice(0, 50).map((e) => ({ ...e, detail: e.detail ? JSON.parse(e.detail) : null })), more });
+});
+
+// ---------- вход через Google ----------
+
+const googleOn = (env) => !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+route('GET', '/api/config', async ({ env }) => json({ google: googleOn(env) }), { auth: false });
+
+const redirect = (to, cookies = []) => {
+  const h = new Headers({ location: to, 'cache-control': 'no-store' });
+  for (const c of cookies) h.append('set-cookie', c);
+  return new Response(null, { status: 302, headers: h });
+};
+const GSTATE = 'tq_gstate';
+
+route(
+  'GET',
+  '/api/auth/google/start',
+  async ({ env, req }) => {
+    if (!googleOn(env)) fail(404, 'вход через Google не настроен');
+    const origin = new URL(req.url).origin;
+    const state = randomHex(16);
+    const q = new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      redirect_uri: `${origin}/api/auth/google/callback`,
+      response_type: 'code',
+      scope: 'openid email profile',
+      state,
+      prompt: 'select_account',
+    });
+    return redirect(`https://accounts.google.com/o/oauth2/v2/auth?${q}`, [`${GSTATE}=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/google; Max-Age=600`]);
+  },
+  { auth: false },
+);
+
+route(
+  'GET',
+  '/api/auth/google/callback',
+  async ({ env, req }) => {
+    if (!googleOn(env)) fail(404, 'вход через Google не настроен');
+    const url = new URL(req.url);
+    const clear = `${GSTATE}=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/google; Max-Age=0`;
+    const bad = (code) => redirect(`/login?google=${code}`, [clear]);
+    const cookie = /(?:^|;\s*)tq_gstate=([0-9a-f]+)/.exec(req.headers.get('cookie') || '');
+    const state = url.searchParams.get('state');
+    const code = url.searchParams.get('code');
+    if (url.searchParams.get('error') || !code || !cookie || !state || !safeEqual(cookie[1], state)) return bad('cancel');
+    let claims;
+    try {
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: env.GOOGLE_CLIENT_ID,
+          client_secret: env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: `${url.origin}/api/auth/google/callback`,
+          grant_type: 'authorization_code',
+        }),
+      });
+      if (!res.ok) return bad('error');
+      const { id_token } = await res.json();
+      // токен получен напрямую от Google по TLS, поэтому достаточно проверить аудиторию и издателя
+      const part = id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(part), (c) => c.charCodeAt(0))));
+    } catch {
+      return bad('error');
+    }
+    if (claims.aud !== env.GOOGLE_CLIENT_ID || !['accounts.google.com', 'https://accounts.google.com'].includes(claims.iss)) return bad('error');
+    if (!claims.email || claims.email_verified !== true || !claims.sub) return bad('email');
+    const email = String(claims.email).toLowerCase();
+
+    let u = await env.DB.prepare('SELECT id FROM users WHERE google_id = ?').bind(claims.sub).first();
+    if (!u) {
+      u = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+      if (u) {
+        // аккаунт с такой почтой уже есть: Google подтвердил владение адресом, привязываем
+        await env.DB.prepare('UPDATE users SET google_id = ?, email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?').bind(claims.sub, now(), u.id).run();
+      } else {
+        const id = newId();
+        const { hash, salt } = await hashPassword(randomHex(24));
+        const name = String(claims.name || email.split('@')[0]).slice(0, 60);
+        await env.DB.prepare('INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at, plan, email_verified_at, google_id) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)')
+          .bind(id, email, name, hash, salt, now(), 'start', now(), claims.sub)
+          .run();
+        u = { id };
+      }
+    }
+    const { cookie: session } = await createSession(env, u.id);
+    return redirect('/panel/', [session, clear]);
+  },
+  { auth: false },
+);
+
+// ---------- статус сервиса ----------
+
+route(
+  'GET',
+  '/api/status',
+  async ({ env }) => {
+    const t0 = Date.now();
+    let db = false;
+    try {
+      await env.DB.prepare('SELECT 1').first();
+      db = true;
+    } catch {
+      /* база недоступна */
+    }
+    const db_ms = Date.now() - t0;
+    let backup = null;
+    try {
+      if (env.BACKUPS) {
+        const { keys } = await env.BACKUPS.list({ prefix: 'b:' });
+        const days = keys.map((k) => /^b:(\d{4}-\d{2}-\d{2}):_index$/.exec(k.name)).filter(Boolean).map((m) => m[1]).sort();
+        backup = days.length ? days[days.length - 1] : null;
+      }
+    } catch {
+      /* kv недоступен */
+    }
+    return json({ ok: db, db, db_ms, backup, ai: !!env.AI, mail: !!env.RESEND_API_KEY || !!env.MAIL_MOCK, google: googleOn(env), time: now() }, 200, { 'cache-control': 'no-store' });
   },
   { auth: false },
 );
@@ -691,6 +943,7 @@ route('POST', '/api/workspaces/join', async ({ env, user, body }) => {
   )
     .bind(ws.id, user.id, 'member', now())
     .run();
+  if (!already) await audit(env, ws.id, user.id, 'member_joined', { name: user.name });
   return json({ workspace: { id: ws.id, name: ws.name } });
 });
 
@@ -749,6 +1002,7 @@ route('POST', '/api/workspaces/:id/roles', async ({ env, user, params, body }) =
   if (cnt.c >= 12) fail(429, 'достигнут лимит: не больше 12 своих ролей');
   const id = newId();
   await env.DB.prepare('INSERT INTO workspace_roles (id, workspace_id, name, color, level, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, params.id, name, color, level, now()).run();
+  await audit(env, params.id, user.id, 'role_created', { name });
   return json({ role: { id, name, color, level } }, 201);
 });
 
@@ -764,6 +1018,7 @@ route('PATCH', '/api/roles/:id', async ({ env, user, params, body }) => {
     env.DB.prepare('UPDATE workspace_roles SET name = ?, color = ?, level = ? WHERE id = ?').bind(name, color, level, params.id),
     env.DB.prepare("UPDATE members SET role = ? WHERE role_id = ? AND role != 'owner'").bind(level, params.id),
   ]);
+  await audit(env, role.workspace_id, user.id, 'role_updated', { name });
   return json({ role: { id: params.id, name, color, level } });
 });
 
@@ -773,6 +1028,7 @@ route('DELETE', '/api/roles/:id', async ({ env, user, params }) => {
   const actor = await requireAdmin(env, role.workspace_id, user.id);
   if (role.level === 'admin' && actor !== 'owner') fail(403, 'роль администратора удаляет только владелец');
   await env.DB.prepare('DELETE FROM workspace_roles WHERE id = ?').bind(params.id).run();
+  await audit(env, role.workspace_id, user.id, 'role_deleted', { name: role.name });
   return json({ ok: true });
 });
 
@@ -786,16 +1042,20 @@ route('PATCH', '/api/workspaces/:id/members/:uid', async ({ env, user, params, b
   if (target.role === 'admin' && actor !== 'owner') fail(403, 'роль администратора меняет только владелец');
   let level;
   let roleId = null;
+  let roleName = null;
   if (body.role_id) {
-    const r = await env.DB.prepare('SELECT id, level FROM workspace_roles WHERE id = ? AND workspace_id = ?').bind(body.role_id, params.id).first();
+    const r = await env.DB.prepare('SELECT id, level, name FROM workspace_roles WHERE id = ? AND workspace_id = ?').bind(body.role_id, params.id).first();
     if (!r) fail(404, 'роль не найдена');
     level = r.level;
     roleId = r.id;
+    roleName = r.name;
   } else {
     level = LEVELS.includes(body.level) ? body.level : fail(400, 'неизвестная роль');
   }
   if (level === 'admin' && actor !== 'owner') fail(403, 'администратора назначает только владелец');
   await env.DB.prepare('UPDATE members SET role = ?, role_id = ? WHERE workspace_id = ? AND user_id = ?').bind(level, roleId, params.id, params.uid).run();
+  const tu = await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(params.uid).first();
+  await audit(env, params.id, user.id, 'member_role', { name: tu ? tu.name : '', to: roleName || DEFAULT_ROLES[level].name });
   return json({ ok: true, level, role_id: roleId });
 });
 
@@ -810,6 +1070,8 @@ route('DELETE', '/api/workspaces/:id/members/:uid', async ({ env, user, params }
     if (target.role === 'admin' && actor !== 'owner') fail(403, 'администратора убирает только владелец');
   }
   await env.DB.prepare('DELETE FROM members WHERE workspace_id = ? AND user_id = ?').bind(params.id, params.uid).run();
+  const tu = await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(params.uid).first();
+  await audit(env, params.id, user.id, params.uid === user.id ? 'member_left' : 'member_removed', { name: tu ? tu.name : '' });
   return json({ ok: true });
 });
 
@@ -833,6 +1095,7 @@ route('POST', '/api/workspaces/:id/projects', async ({ env, user, params, body }
       ),
     ),
   ]);
+  await audit(env, params.id, user.id, 'project_created', { name });
   return json({ project: { id, name, kind, total: 0, done: 0 } }, 201);
 });
 
@@ -885,9 +1148,10 @@ route('GET', '/api/projects/:id', async ({ env, user, params }) => {
 });
 
 route('PATCH', '/api/projects/:id', async ({ env, user, params, body }) => {
-  await projectContext(env, params.id, user.id);
+  const prev = await projectContext(env, params.id, user.id);
   const name = cleanString(body.name, 'название', { max: 80 });
   await env.DB.prepare('UPDATE projects SET name = ? WHERE id = ?').bind(name, params.id).run();
+  if (prev.name !== name) await audit(env, prev.workspace_id, user.id, 'project_renamed', { from: prev.name, to: name });
   return json({ project: { id: params.id, name } });
 });
 
@@ -895,6 +1159,7 @@ route('DELETE', '/api/projects/:id', async ({ env, user, params }) => {
   const project = await projectContext(env, params.id, user.id);
   if (!isAdminRole(project.role)) fail(403, 'удалять проекты может владелец или администратор');
   await env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(params.id).run();
+  await audit(env, project.workspace_id, user.id, 'project_deleted', { name: project.name });
   return json({ ok: true });
 });
 
@@ -904,6 +1169,7 @@ route('POST', '/api/projects/:id/share', async ({ env, user, params }) => {
   if (!isAdminRole(project.role)) fail(403, 'ссылкой делится владелец или администратор');
   const token = project.share_token || randomHex(16);
   await env.DB.prepare('UPDATE projects SET share_token = ? WHERE id = ?').bind(token, params.id).run();
+  if (!project.share_token) await audit(env, project.workspace_id, user.id, 'share_on', { name: project.name });
   return json({ share_token: token });
 });
 
@@ -911,6 +1177,7 @@ route('DELETE', '/api/projects/:id/share', async ({ env, user, params }) => {
   const project = await projectContext(env, params.id, user.id);
   if (!isAdminRole(project.role)) fail(403, 'ссылкой делится владелец или администратор');
   await env.DB.prepare('UPDATE projects SET share_token = NULL WHERE id = ?').bind(params.id).run();
+  if (project.share_token) await audit(env, project.workspace_id, user.id, 'share_off', { name: project.name });
   return json({ ok: true });
 });
 
@@ -1161,8 +1428,9 @@ route('GET', '/api/tasks/:id/history', async ({ env, user, params }) => {
 });
 
 route('DELETE', '/api/tasks/:id', async ({ env, user, params }) => {
-  await taskContext(env, params.id, user.id);
+  const task = await taskContext(env, params.id, user.id);
   await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(params.id).run();
+  await audit(env, task.workspace_id, user.id, 'task_deleted', { title: task.title });
   return json({ ok: true });
 });
 
@@ -1403,8 +1671,9 @@ route('PATCH', '/api/notes/:id', async ({ env, user, params, body }) => {
 });
 
 route('DELETE', '/api/notes/:id', async ({ env, user, params }) => {
-  await noteContext(env, params.id, user.id);
+  const note = await noteContext(env, params.id, user.id);
   await env.DB.prepare('DELETE FROM notes WHERE id = ?').bind(params.id).run();
+  await audit(env, note.workspace_id, user.id, 'note_deleted', { title: note.title });
   return json({ ok: true });
 });
 
@@ -1501,6 +1770,7 @@ route('DELETE', '/api/files/:id', async ({ env, user, params }) => {
   const file = await fileContext(env, params.id, user.id);
   if (file.uploaded_by !== user.id && !isAdminRole(file.role)) fail(403, 'удалить файл может его автор, владелец или администратор');
   await env.DB.prepare('DELETE FROM files WHERE id = ?').bind(params.id).run();
+  await audit(env, file.workspace_id, user.id, 'file_deleted', { name: file.name });
   return json({ ok: true });
 });
 
@@ -1794,7 +2064,7 @@ function withCors(res, origin) {
 
 // ---------- резервные копии ----------
 // раз в сутки по расписанию (cron) все таблицы, кроме сессий, файлов и счётчиков, копируются в kv на 14 дней
-const BACKUP_SKIP = new Set(['sessions', 'file_blobs', 'ai_usage']);
+const BACKUP_SKIP = new Set(['sessions', 'file_blobs', 'ai_usage', 'email_verifications', 'password_resets']);
 const BACKUP_TTL = 14 * 24 * 3600;
 async function runBackup(env) {
   if (!env.BACKUPS) return { skipped: 'нет привязки BACKUPS' };
