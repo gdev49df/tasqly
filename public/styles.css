@@ -1654,3 +1654,5 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .hero h1 { margin-bottom: 26px; }
 /* текст для поисковиков, пока не загрузился скрипт: не мигает у людей */
 [data-seo] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* кнопка удаления проекта — той же высоты, что и вкладки вида */
+.project-head .del-project { height: 35px; padding: 0 14px; border-radius: 10px; display: inline-flex; align-items: center; font-size: 13.5px; }
