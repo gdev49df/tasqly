@@ -203,6 +203,15 @@
     home: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 9 10 3.5 16.5 9v7a1 1 0 0 1-1 1h-3.5v-5h-4v5H4.5a1 1 0 0 1-1-1z"/></svg>',
     folder: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2.5 6a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.8H16A1.5 1.5 0 0 1 17.5 7.8v6.7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
   };
+  const FIC = [
+    '<rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/>',
+    '<rect x="3" y="3.5" width="14" height="13" rx="2"/><path d="M7.5 3.5v13M12.5 3.5v13"/>',
+    '<circle cx="10" cy="10.5" r="6.5"/><path d="M10 7v3.7l2.3 1.4M8 2h4"/>',
+    '<path d="M10 3a7 7 0 1 0 7 7"/><path d="M10 3v7h7"/>',
+    '<path d="M4 16h3l8-8.5a1.8 1.8 0 0 0-2.5-2.5L4.5 13.5z"/><path d="M12 6l2 2"/>',
+    '<path d="M3.5 5.5A2 2 0 0 1 5.5 3.5h9a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9l-3.5 3v-3a2 2 0 0 1-2-2z"/>',
+    '<path d="M3 6a1.5 1.5 0 0 1 1.5-1.5h3l1.6 1.8h6.4A1.5 1.5 0 0 1 17 7.8v6.7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/>',
+    '<path d="M10 2.5l1.7 4.6 4.6 1.7-4.6 1.7L10 15.1l-1.7-4.6L3.7 8.8l4.6-1.7z"/>'];
   const icon = (name) => {
     const el = h('span', { class: 'ico' });
     el.innerHTML = ICONS[name];
@@ -573,12 +582,7 @@
 
     // логотип: знак «q» на акцентном фоне + слово
   function logoEl(attrs) {
-    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    mark.setAttribute('viewBox', '0 0 512 512');
-    mark.setAttribute('class', 'logo-mark');
-    mark.setAttribute('aria-hidden', 'true');
-    mark.innerHTML = '<rect width="512" height="512" rx="112" fill="currentColor"/><g fill="none" stroke="#111" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g>';
-    return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), mark, h('span', null, 'tasq', h('b', null, 'ly')));
+    return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), h('span', { class: 'logo-word' }, 'tasqly'));
   }
 
   // ---------- быстрое создание и учёт времени из верхней панели ----------
@@ -1060,7 +1064,7 @@
         h('section', { class: 'land-sec', id: 'showcase' }, h('h2', null, 'Не просто доска: всё для работы рядом'), h('div', { class: 'sc' }, showcase)),
         h('section', { class: 'land-sec wide', id: 'roles' }, rolesBox),
         h('section', { class: 'land-sec', id: 'tabs' }, h('h2', null, 'tasqly подстраивается под твои задачи'), tabsBox),
-        h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('div', { class: 'bento' }, features.map(([t, d], i) => h('div', { class: 'bento-cell reveal', style: `transition-delay:${(i % 4) * 70}ms` }, h('span', { class: 'bento-ic', 'aria-hidden': 'true' }, ['▦','▤','◷','◎','✎','✉','▣','✦'][i]), h('b', null, t), h('span', null, d))))),
+        h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('div', { class: 'bento' }, features.map(([t, d], i) => h('div', { class: 'bento-cell reveal', style: `transition-delay:${(i % 4) * 70}ms` }, h('span', { class: 'bento-ic', 'aria-hidden': 'true' }, svgEl(`<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${FIC[i]}</svg>`)), h('b', null, t), h('span', null, d))))),
         h(
           'section',
           { class: 'land-sec', id: 'kinds' },
