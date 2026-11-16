@@ -1335,3 +1335,13 @@ input:focus, textarea:focus, select:focus, input[type='number']:focus { border-c
 :root[data-theme='dark'] .pr-badge { background: var(--lime); color: var(--lime-ink); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .pr-badge { background: var(--lime); color: var(--lime-ink); } }
 @media (prefers-reduced-motion: reduce) { .ft-view, .tv-row u { animation: none; } }
+
+/* v5.2: без горизонтального сдвига на телефоне */
+html, body { overflow-x: clip; max-width: 100%; }
+.sc-row > * { min-width: 0; }
+.sc-mock { overflow: hidden; max-width: 100%; }
+@media (max-width: 720px) {
+  .sc-row { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .sc-row.flip .sc-copy { order: 0; }
+  .sc-ov { flex-wrap: wrap; }
+}
