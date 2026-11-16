@@ -4,7 +4,6 @@
 const enc = new TextEncoder();
 const SESSION_DAYS = 30;
 const PBKDF2_ITERATIONS = 100000; // максимум, который разрешает workers
-const STATUSES = ['todo', 'doing', 'done'];
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -150,6 +149,45 @@ async function taskContext(env, taskId, userId) {
   return task;
 }
 
+async function columnContext(env, columnId, userId) {
+  const col = await env.DB.prepare(
+    `SELECT c.*, p.workspace_id FROM columns c
+     JOIN projects p ON p.id = c.project_id
+     JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?
+     WHERE c.id = ?`,
+  )
+    .bind(userId, columnId)
+    .first();
+  if (!col) fail(404, 'колонка не найдена');
+  return col;
+}
+
+async function checklistContext(env, itemId, userId) {
+  const item = await env.DB.prepare(
+    `SELECT i.* FROM checklist_items i
+     JOIN tasks t ON t.id = i.task_id
+     JOIN projects p ON p.id = t.project_id
+     JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?
+     WHERE i.id = ?`,
+  )
+    .bind(userId, itemId)
+    .first();
+  if (!item) fail(404, 'пункт не найден');
+  return item;
+}
+
+async function labelContext(env, labelId, userId) {
+  const label = await env.DB.prepare(
+    `SELECT l.* FROM labels l
+     JOIN members m ON m.workspace_id = l.workspace_id AND m.user_id = ?
+     WHERE l.id = ?`,
+  )
+    .bind(userId, labelId)
+    .first();
+  if (!label) fail(404, 'метка не найдена');
+  return label;
+}
+
 async function validateAssignee(env, workspaceId, assigneeId) {
   if (assigneeId === null || assigneeId === undefined || assigneeId === '') return null;
   if (typeof assigneeId !== 'string') fail(400, 'неверный исполнитель');
@@ -158,6 +196,14 @@ async function validateAssignee(env, workspaceId, assigneeId) {
     .first();
   if (!ok) fail(400, 'исполнитель не состоит в пространстве');
   return assigneeId;
+}
+
+// колонка должна принадлежать этому же проекту
+async function validateColumn(env, projectId, columnId) {
+  if (typeof columnId !== 'string') fail(400, 'неверная колонка');
+  const ok = await env.DB.prepare('SELECT 1 FROM columns WHERE id = ? AND project_id = ?').bind(columnId, projectId).first();
+  if (!ok) fail(400, 'колонка не из этого проекта');
+  return columnId;
 }
 
 function validateDueDate(value) {
@@ -173,9 +219,41 @@ function validatePriority(value) {
   return value;
 }
 
-function validateStatus(value) {
-  if (!STATUSES.includes(value)) fail(400, 'неизвестный статус');
+function validateColor(value) {
+  if (typeof value !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value)) fail(400, 'цвет в формате #rrggbb');
+  return value.toLowerCase();
+}
+
+function validatePosition(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) fail(400, 'неверная позиция');
   return value;
+}
+
+const DEFAULT_COLUMNS = [
+  { name: 'К выполнению', is_done: 0 },
+  { name: 'В работе', is_done: 0 },
+  { name: 'Готово', is_done: 1 },
+];
+
+// общий запрос задачи: плюс счётчики и список меток
+const TASK_SELECT = `SELECT t.id, t.project_id, t.column_id, t.title, t.description, t.priority, t.assignee_id, t.due_date,
+    t.position, t.created_at, t.updated_at,
+    (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) AS comments,
+    (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id) AS check_total,
+    (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id AND i.done = 1) AS check_done,
+    (SELECT group_concat(label_id) FROM task_labels tl WHERE tl.task_id = t.id) AS label_ids
+  FROM tasks t`;
+
+const shapeTask = (row) => ({ ...row, label_ids: row.label_ids ? row.label_ids.split(',') : [] });
+
+async function loadTask(env, taskId) {
+  const row = await env.DB.prepare(`${TASK_SELECT} WHERE t.id = ?`).bind(taskId).first();
+  return shapeTask(row);
+}
+
+async function nextPosition(env, table, column, value) {
+  const last = await env.DB.prepare(`SELECT MAX(position) AS p FROM ${table} WHERE ${column} = ?`).bind(value).first();
+  return (last && last.p !== null ? last.p : 0) + 1000;
 }
 
 // ---------- маршруты ----------
@@ -295,7 +373,7 @@ route('POST', '/api/workspaces/join', async ({ env, user, body }) => {
 route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
   const role = await requireMember(env, params.id, user.id);
   const ws = await env.DB.prepare('SELECT id, name, invite_code FROM workspaces WHERE id = ?').bind(params.id).first();
-  const [members, projects] = await Promise.all([
+  const [members, projects, labels] = await Promise.all([
     env.DB.prepare(
       `SELECT u.id, u.name, u.email, m.role FROM members m JOIN users u ON u.id = m.user_id
        WHERE m.workspace_id = ? ORDER BY m.joined_at`,
@@ -305,49 +383,90 @@ route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
     env.DB.prepare(
       `SELECT p.id, p.name,
          (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS total,
-         (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'done') AS done
+         (SELECT COUNT(*) FROM tasks t JOIN columns c ON c.id = t.column_id WHERE t.project_id = p.id AND c.is_done = 1) AS done
        FROM projects p WHERE p.workspace_id = ? ORDER BY p.created_at`,
     )
       .bind(params.id)
       .all(),
+    env.DB.prepare('SELECT id, name, color FROM labels WHERE workspace_id = ? ORDER BY created_at').bind(params.id).all(),
   ]);
-  return json({ workspace: { ...ws, role }, members: members.results, projects: projects.results });
+  return json({ workspace: { ...ws, role }, members: members.results, projects: projects.results, labels: labels.results });
 });
 
 route('POST', '/api/workspaces/:id/projects', async ({ env, user, params, body }) => {
   await requireMember(env, params.id, user.id);
   const name = cleanString(body.name, 'название', { max: 80 });
   const id = newId();
-  await env.DB.prepare('INSERT INTO projects (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)')
-    .bind(id, params.id, name, now())
-    .run();
+  const ts = now();
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO projects (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)').bind(id, params.id, name, ts),
+    ...DEFAULT_COLUMNS.map((c, i) =>
+      env.DB.prepare('INSERT INTO columns (id, project_id, name, position, is_done, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(
+        newId(),
+        id,
+        c.name,
+        (i + 1) * 1000,
+        c.is_done,
+        ts,
+      ),
+    ),
+  ]);
   return json({ project: { id, name, total: 0, done: 0 } }, 201);
+});
+
+// метки пространства
+
+route('POST', '/api/workspaces/:id/labels', async ({ env, user, params, body }) => {
+  await requireMember(env, params.id, user.id);
+  const name = cleanString(body.name, 'название метки', { max: 30 });
+  const color = validateColor(body.color);
+  // lower() в sqlite не знает кириллицу, поэтому сравниваем в js
+  const existing = await env.DB.prepare('SELECT name FROM labels WHERE workspace_id = ?').bind(params.id).all();
+  if (existing.results.some((l) => l.name.toLowerCase() === name.toLowerCase())) fail(409, 'такая метка уже есть');
+  const id = newId();
+  await env.DB.prepare('INSERT INTO labels (id, workspace_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(id, params.id, name, color, now())
+    .run();
+  return json({ label: { id, name, color } }, 201);
+});
+
+route('DELETE', '/api/labels/:id', async ({ env, user, params }) => {
+  await labelContext(env, params.id, user.id);
+  await env.DB.prepare('DELETE FROM labels WHERE id = ?').bind(params.id).run();
+  return json({ ok: true });
 });
 
 // проекты
 
 route('GET', '/api/projects/:id', async ({ env, user, params }) => {
   const project = await projectContext(env, params.id, user.id);
-  const [tasks, members] = await Promise.all([
-    env.DB.prepare(
-      `SELECT id, title, description, status, priority, assignee_id, due_date, position, created_at, updated_at,
-         (SELECT COUNT(*) FROM comments c WHERE c.task_id = tasks.id) AS comments
-       FROM tasks WHERE project_id = ? ORDER BY position, created_at`,
-    )
+  const [columns, tasks, members, labels] = await Promise.all([
+    env.DB.prepare('SELECT id, name, position, is_done FROM columns WHERE project_id = ? ORDER BY position, created_at')
       .bind(params.id)
       .all(),
+    env.DB.prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.position, t.created_at`).bind(params.id).all(),
     env.DB.prepare(
       `SELECT u.id, u.name FROM members m JOIN users u ON u.id = m.user_id
        WHERE m.workspace_id = ? ORDER BY m.joined_at`,
     )
       .bind(project.workspace_id)
       .all(),
+    env.DB.prepare('SELECT id, name, color FROM labels WHERE workspace_id = ? ORDER BY created_at').bind(project.workspace_id).all(),
   ]);
   return json({
     project: { id: project.id, name: project.name, workspace_id: project.workspace_id, role: project.role },
-    tasks: tasks.results,
+    columns: columns.results.map((c) => ({ ...c, is_done: !!c.is_done })),
+    tasks: tasks.results.map(shapeTask),
     members: members.results,
+    labels: labels.results,
   });
+});
+
+route('PATCH', '/api/projects/:id', async ({ env, user, params, body }) => {
+  await projectContext(env, params.id, user.id);
+  const name = cleanString(body.name, 'название', { max: 80 });
+  await env.DB.prepare('UPDATE projects SET name = ? WHERE id = ?').bind(name, params.id).run();
+  return json({ project: { id: params.id, name } });
 });
 
 route('DELETE', '/api/projects/:id', async ({ env, user, params }) => {
@@ -357,48 +476,92 @@ route('DELETE', '/api/projects/:id', async ({ env, user, params }) => {
   return json({ ok: true });
 });
 
+// колонки
+
+route('POST', '/api/projects/:id/columns', async ({ env, user, params, body }) => {
+  await projectContext(env, params.id, user.id);
+  const name = cleanString(body.name, 'название', { max: 40 });
+  const isDone = body.is_done ? 1 : 0;
+  const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM columns WHERE project_id = ?').bind(params.id).first();
+  if (count.n >= 12) fail(400, 'не больше 12 колонок в проекте');
+  const id = newId();
+  const position = await nextPosition(env, 'columns', 'project_id', params.id);
+  await env.DB.prepare('INSERT INTO columns (id, project_id, name, position, is_done, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(id, params.id, name, position, isDone, now())
+    .run();
+  return json({ column: { id, name, position, is_done: !!isDone } }, 201);
+});
+
+route('PATCH', '/api/columns/:id', async ({ env, user, params, body }) => {
+  await columnContext(env, params.id, user.id);
+  const sets = [];
+  const values = [];
+  if (body.name !== undefined) {
+    sets.push('name = ?');
+    values.push(cleanString(body.name, 'название', { max: 40 }));
+  }
+  if (body.is_done !== undefined) {
+    sets.push('is_done = ?');
+    values.push(body.is_done ? 1 : 0);
+  }
+  if (body.position !== undefined) {
+    sets.push('position = ?');
+    values.push(validatePosition(body.position));
+  }
+  if (!sets.length) fail(400, 'нечего обновлять');
+  await env.DB.prepare(`UPDATE columns SET ${sets.join(', ')} WHERE id = ?`)
+    .bind(...values, params.id)
+    .run();
+  const col = await env.DB.prepare('SELECT id, name, position, is_done FROM columns WHERE id = ?').bind(params.id).first();
+  return json({ column: { ...col, is_done: !!col.is_done } });
+});
+
+route('DELETE', '/api/columns/:id', async ({ env, user, params }) => {
+  const col = await columnContext(env, params.id, user.id);
+  const { results } = await env.DB.prepare('SELECT id FROM columns WHERE project_id = ? ORDER BY position, created_at')
+    .bind(col.project_id)
+    .all();
+  if (results.length < 2) fail(400, 'нельзя удалить последнюю колонку');
+  // задачи переезжают в соседнюю колонку (слева, а если её нет, то справа), в конец списка
+  const idx = results.findIndex((c) => c.id === params.id);
+  const target = (results[idx - 1] || results[idx + 1]).id;
+  const offset = (await nextPosition(env, 'tasks', 'column_id', target)) - 1000;
+  await env.DB.batch([
+    env.DB.prepare('UPDATE tasks SET column_id = ?, position = position + ? WHERE column_id = ?').bind(target, offset, params.id),
+    env.DB.prepare('DELETE FROM columns WHERE id = ?').bind(params.id),
+  ]);
+  return json({ ok: true, moved_to: target });
+});
+
 // задачи
 
 route('POST', '/api/projects/:id/tasks', async ({ env, user, params, body }) => {
   const project = await projectContext(env, params.id, user.id);
   const title = cleanString(body.title, 'название', { max: 200 });
-  const status = body.status === undefined ? 'todo' : validateStatus(body.status);
+  let columnId = body.column_id;
+  if (columnId === undefined) {
+    const first = await env.DB.prepare('SELECT id FROM columns WHERE project_id = ? ORDER BY position LIMIT 1').bind(params.id).first();
+    if (!first) fail(400, 'в проекте нет колонок');
+    columnId = first.id;
+  } else {
+    await validateColumn(env, params.id, columnId);
+  }
   const description =
     body.description === undefined ? '' : cleanString(body.description, 'описание', { max: 5000, allowEmpty: true });
   const priority = body.priority === undefined ? 0 : validatePriority(body.priority);
   const dueDate = validateDueDate(body.due_date);
   const assigneeId = await validateAssignee(env, project.workspace_id, body.assignee_id);
 
-  const last = await env.DB.prepare('SELECT MAX(position) AS p FROM tasks WHERE project_id = ? AND status = ?')
-    .bind(params.id, status)
-    .first();
-  const position = (last && last.p !== null ? last.p : 0) + 1000;
+  const position = await nextPosition(env, 'tasks', 'column_id', columnId);
   const id = newId();
   const ts = now();
   await env.DB.prepare(
-    `INSERT INTO tasks (id, project_id, title, description, status, priority, assignee_id, due_date, position, created_by, created_at, updated_at)
+    `INSERT INTO tasks (id, project_id, column_id, title, description, priority, assignee_id, due_date, position, created_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, params.id, title, description, status, priority, assigneeId, dueDate, position, user.id, ts, ts)
+    .bind(id, params.id, columnId, title, description, priority, assigneeId, dueDate, position, user.id, ts, ts)
     .run();
-  return json(
-    {
-      task: {
-        id,
-        title,
-        description,
-        status,
-        priority,
-        assignee_id: assigneeId,
-        due_date: dueDate,
-        position,
-        created_at: ts,
-        updated_at: ts,
-        comments: 0,
-      },
-    },
-    201,
-  );
+  return json({ task: await loadTask(env, id) }, 201);
 });
 
 route('PATCH', '/api/tasks/:id', async ({ env, user, params, body }) => {
@@ -413,33 +576,91 @@ route('PATCH', '/api/tasks/:id', async ({ env, user, params, body }) => {
   if (body.title !== undefined) set('title', cleanString(body.title, 'название', { max: 200 }));
   if (body.description !== undefined)
     set('description', cleanString(body.description, 'описание', { max: 5000, allowEmpty: true }));
-  if (body.status !== undefined) set('status', validateStatus(body.status));
+  if (body.column_id !== undefined) set('column_id', await validateColumn(env, task.project_id, body.column_id));
   if (body.priority !== undefined) set('priority', validatePriority(body.priority));
   if (body.due_date !== undefined) set('due_date', validateDueDate(body.due_date));
   if (body.assignee_id !== undefined) set('assignee_id', await validateAssignee(env, task.workspace_id, body.assignee_id));
-  if (body.position !== undefined) {
-    if (typeof body.position !== 'number' || !Number.isFinite(body.position)) fail(400, 'неверная позиция');
-    set('position', body.position);
-  }
+  if (body.position !== undefined) set('position', validatePosition(body.position));
   if (!sets.length) fail(400, 'нечего обновлять');
 
   set('updated_at', now());
   await env.DB.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`)
     .bind(...values, params.id)
     .run();
-  const updated = await env.DB.prepare(
-    `SELECT id, title, description, status, priority, assignee_id, due_date, position, created_at, updated_at,
-       (SELECT COUNT(*) FROM comments c WHERE c.task_id = tasks.id) AS comments
-     FROM tasks WHERE id = ?`,
-  )
-    .bind(params.id)
-    .first();
-  return json({ task: updated });
+  return json({ task: await loadTask(env, params.id) });
+});
+
+route('PUT', '/api/tasks/:id/labels', async ({ env, user, params, body }) => {
+  const task = await taskContext(env, params.id, user.id);
+  if (!Array.isArray(body.label_ids) || body.label_ids.length > 20) fail(400, 'label_ids должен быть массивом (до 20)');
+  const ids = [...new Set(body.label_ids)];
+  for (const id of ids) {
+    if (typeof id !== 'string') fail(400, 'неверная метка');
+    const ok = await env.DB.prepare('SELECT 1 FROM labels WHERE id = ? AND workspace_id = ?').bind(id, task.workspace_id).first();
+    if (!ok) fail(400, 'метка не из этого пространства');
+  }
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM task_labels WHERE task_id = ?').bind(params.id),
+    ...ids.map((id) => env.DB.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').bind(params.id, id)),
+    env.DB.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').bind(now(), params.id),
+  ]);
+  return json({ task: await loadTask(env, params.id) });
 });
 
 route('DELETE', '/api/tasks/:id', async ({ env, user, params }) => {
   await taskContext(env, params.id, user.id);
   await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(params.id).run();
+  return json({ ok: true });
+});
+
+// подзадачи и чек-листы
+
+route('GET', '/api/tasks/:id/checklist', async ({ env, user, params }) => {
+  await taskContext(env, params.id, user.id);
+  const { results } = await env.DB.prepare(
+    'SELECT id, text, done, position FROM checklist_items WHERE task_id = ? ORDER BY position, created_at',
+  )
+    .bind(params.id)
+    .all();
+  return json({ items: results.map((i) => ({ ...i, done: !!i.done })) });
+});
+
+route('POST', '/api/tasks/:id/checklist', async ({ env, user, params, body }) => {
+  await taskContext(env, params.id, user.id);
+  const text = cleanString(body.text, 'пункт', { max: 200 });
+  const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM checklist_items WHERE task_id = ?').bind(params.id).first();
+  if (count.n >= 100) fail(400, 'не больше 100 пунктов в задаче');
+  const id = newId();
+  const position = await nextPosition(env, 'checklist_items', 'task_id', params.id);
+  await env.DB.prepare('INSERT INTO checklist_items (id, task_id, text, done, position, created_at) VALUES (?, ?, ?, 0, ?, ?)')
+    .bind(id, params.id, text, position, now())
+    .run();
+  return json({ item: { id, text, done: false, position } }, 201);
+});
+
+route('PATCH', '/api/checklist/:id', async ({ env, user, params, body }) => {
+  await checklistContext(env, params.id, user.id);
+  const sets = [];
+  const values = [];
+  if (body.text !== undefined) {
+    sets.push('text = ?');
+    values.push(cleanString(body.text, 'пункт', { max: 200 }));
+  }
+  if (body.done !== undefined) {
+    sets.push('done = ?');
+    values.push(body.done ? 1 : 0);
+  }
+  if (!sets.length) fail(400, 'нечего обновлять');
+  await env.DB.prepare(`UPDATE checklist_items SET ${sets.join(', ')} WHERE id = ?`)
+    .bind(...values, params.id)
+    .run();
+  const item = await env.DB.prepare('SELECT id, text, done, position FROM checklist_items WHERE id = ?').bind(params.id).first();
+  return json({ item: { ...item, done: !!item.done } });
+});
+
+route('DELETE', '/api/checklist/:id', async ({ env, user, params }) => {
+  await checklistContext(env, params.id, user.id);
+  await env.DB.prepare('DELETE FROM checklist_items WHERE id = ?').bind(params.id).run();
   return json({ ok: true });
 });
 
@@ -546,7 +767,7 @@ export default {
         new Response(null, {
           status: 204,
           headers: {
-            'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+            'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
             'access-control-allow-headers': 'content-type, authorization',
             'access-control-max-age': '86400',
           },

@@ -41,12 +41,23 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_id);
 
+-- колонки доски: у каждого проекта свои, названия и порядок настраиваются
+CREATE TABLE IF NOT EXISTS columns (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  position REAL NOT NULL DEFAULT 0,
+  is_done INTEGER NOT NULL DEFAULT 0, -- 1 = задачи в этой колонке считаются выполненными
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_columns_project ON columns(project_id, position);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  column_id TEXT NOT NULL REFERENCES columns(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'todo', -- todo | doing | done
   priority INTEGER NOT NULL DEFAULT 0, -- 0 нет, 1 низкий, 2 средний, 3 высокий
   assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   due_date TEXT, -- YYYY-MM-DD
@@ -55,7 +66,36 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id, status, position);
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_column ON tasks(column_id, position);
+
+-- метки: общие для пространства
+CREATE TABLE IF NOT EXISTS labels (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (workspace_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS task_labels (
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_id, label_id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_labels_label ON task_labels(label_id);
+
+-- подзадачи и чек-листы внутри задачи
+CREATE TABLE IF NOT EXISTS checklist_items (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  done INTEGER NOT NULL DEFAULT 0,
+  position REAL NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_checklist_task ON checklist_items(task_id, position);
 
 CREATE TABLE IF NOT EXISTS comments (
   id TEXT PRIMARY KEY,
