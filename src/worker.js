@@ -324,6 +324,39 @@ route(
 
 route('GET', '/api/me', async ({ user }) => json({ user }));
 
+// входящие: мои незавершённые задачи и свежие комментарии других людей к моим задачам
+route('GET', '/api/inbox', async ({ env, user }) => {
+  const tasks = await env.DB.prepare(
+    `SELECT t.id, t.title, t.due_date, t.project_id, p.name AS project_name, c.name AS column_name
+     FROM tasks t
+     JOIN projects p ON p.id = t.project_id
+     JOIN columns c ON c.id = t.column_id
+     JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?1
+     WHERE t.assignee_id = ?1 AND c.is_done = 0
+     ORDER BY (t.due_date IS NULL), t.due_date, t.created_at DESC
+     LIMIT 30`,
+  )
+    .bind(user.id)
+    .all();
+  const since = now() - 14 * 24 * 3600 * 1000;
+  const comments = await env.DB.prepare(
+    `SELECT cm.id, cm.body, cm.created_at, u.name AS author, t.id AS task_id, t.title, t.project_id
+     FROM comments cm
+     JOIN tasks t ON t.id = cm.task_id
+     JOIN projects p ON p.id = t.project_id
+     JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?1
+     LEFT JOIN users u ON u.id = cm.user_id
+     WHERE (t.assignee_id = ?1 OR t.created_by = ?1)
+       AND (cm.user_id IS NULL OR cm.user_id != ?1)
+       AND cm.created_at > ?2
+     ORDER BY cm.created_at DESC
+     LIMIT 20`,
+  )
+    .bind(user.id, since)
+    .all();
+  return json({ tasks: tasks.results, comments: comments.results });
+});
+
 // пространства
 
 route('GET', '/api/workspaces', async ({ env, user }) => {

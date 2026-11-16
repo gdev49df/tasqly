@@ -189,35 +189,181 @@
 
   // ---------- каркас ----------
 
-  const THEME_ICON = { auto: '◐', light: '☀', dark: '☾' };
+
   const THEME_TEXT = { auto: 'Тема: как в системе', light: 'Тема: светлая', dark: 'Тема: тёмная' };
 
-  function themeButton() {
-    const btn = h('button', { class: 'icon-btn', title: 'Сменить тему', 'aria-label': 'Сменить тему' }, THEME_ICON[themeStore.get()]);
-    btn.addEventListener('click', () => {
-      const order = ['auto', 'light', 'dark'];
-      const next = order[(order.indexOf(themeStore.get()) + 1) % order.length];
-      themeStore.set(next);
-      applyTheme(next);
-      btn.textContent = THEME_ICON[next];
-      toast(THEME_TEXT[next]);
-    });
-    return btn;
+  const ICONS = {
+    menu: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>',
+    mail: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="4.5" width="15" height="11" rx="2.5"/><path d="m3.5 6 6.5 5 6.5-5" stroke-linecap="round"/></svg>',
+    home: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 9 10 3.5 16.5 9v7a1 1 0 0 1-1 1h-3.5v-5h-4v5H4.5a1 1 0 0 1-1-1z"/></svg>',
+    folder: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2.5 6a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.8H16A1.5 1.5 0 0 1 17.5 7.8v6.7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
+  };
+  const icon = (name) => {
+    const el = h('span', { class: 'ico' });
+    el.innerHTML = ICONS[name];
+    return el;
+  };
+
+  const SEEN_KEY = 'tq_inbox_seen';
+  const lastSeen = () => Number(localStorage.getItem(SEEN_KEY) || 0);
+
+  // ---------- левая панель ----------
+
+  function openDrawer() {
+    document.querySelectorAll('.drawer-wrap').forEach((d) => d.remove());
+    const list = h('div', { class: 'drawer-list' }, h('div', { class: 'drawer-note' }, 'Загрузка…'));
+    const close = () => {
+      wrap.classList.remove('open');
+      setTimeout(() => wrap.remove(), 220);
+    };
+    const go = (href) => () => {
+      close();
+      location.hash = href;
+    };
+    const wrap = h(
+      'div',
+      { class: 'overlay drawer-wrap' },
+      h('div', { class: 'scrim', onclick: close }),
+      h(
+        'aside',
+        { class: 'drawer', role: 'dialog', 'aria-label': 'Меню' },
+        h('div', { class: 'drawer-head' }, h('a', { class: 'logo', href: '#/', onclick: close }, 'tasq', h('b', null, 'ly')), h('button', { class: 'icon-btn', 'aria-label': 'Закрыть меню', onclick: close }, '✕')),
+        h('button', { class: 'drawer-item', onclick: go('#/') }, icon('home'), 'Главная'),
+        h('button', { class: 'drawer-item', onclick: () => (close(), openInbox(document.querySelector('.mail-btn'))) }, icon('mail'), 'Входящие'),
+        h('div', { class: 'drawer-title' }, 'Пространства'),
+        list,
+      ),
+    );
+    wrap.addEventListener('tq-close', close);
+    document.body.append(wrap);
+    requestAnimationFrame(() => wrap.classList.add('open'));
+    api
+      .get('/api/workspaces')
+      .then(({ workspaces }) => {
+        list.replaceChildren(
+          ...(workspaces.length
+            ? workspaces.map((w) => h('button', { class: 'drawer-item', onclick: go(`#/w/${w.id}`) }, icon('folder'), h('span', { class: 'grow' }, w.name)))
+            : [h('div', { class: 'drawer-note' }, 'Пространств пока нет')]),
+        );
+      })
+      .catch(() => list.replaceChildren(h('div', { class: 'drawer-note' }, 'Не удалось загрузить')));
+  }
+
+  // ---------- письма (входящие) ----------
+
+  let inboxEl = null;
+  function closeInbox() {
+    if (!inboxEl) return;
+    inboxEl.remove();
+    inboxEl = null;
+    document.removeEventListener('mousedown', onInboxOutside, true);
+  }
+  function onInboxOutside(e) {
+    if (inboxEl && !inboxEl.contains(e.target) && !e.target.closest('.mail-btn')) closeInbox();
+  }
+
+  async function openInbox(anchor) {
+    if (inboxEl) return closeInbox();
+    closeMenu();
+    const body = h('div', { class: 'inbox-body' }, h('div', { class: 'drawer-note' }, 'Загрузка…'));
+    inboxEl = h('div', { class: 'popover inbox', role: 'dialog', 'aria-label': 'Входящие' }, h('div', { class: 'popover-head' }, 'Входящие'), body);
+    document.body.append(inboxEl);
+    document.addEventListener('mousedown', onInboxOutside, true);
+    try {
+      const data = await api.get('/api/inbox');
+      const today = todayIso();
+      const seen = lastSeen();
+      const openTo = (href) => {
+        closeInbox();
+        location.hash = href;
+      };
+      const rows = [];
+      if (data.comments.length) {
+        rows.push(h('div', { class: 'popover-title' }, 'Комментарии'));
+        data.comments.forEach((c) =>
+          rows.push(
+            h(
+              'button',
+              { class: `mail-row${c.created_at > seen ? ' unread' : ''}`, onclick: () => openTo(`#/p/${c.project_id}`) },
+              avatar(c.author || '?'),
+              h('div', { class: 'mail-text' }, h('div', { class: 'mail-top' }, h('b', null, c.author || 'Кто-то'), ' в «', c.title, '»'), h('div', { class: 'mail-sub' }, c.body)),
+              h('span', { class: 'mail-time' }, new Date(c.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })),
+            ),
+          ),
+        );
+      }
+      if (data.tasks.length) {
+        rows.push(h('div', { class: 'popover-title' }, 'Назначено тебе'));
+        data.tasks.forEach((t) =>
+          rows.push(
+            h(
+              'button',
+              { class: 'mail-row', onclick: () => openTo(`#/p/${t.project_id}`) },
+              h('span', { class: `dot${t.due_date && t.due_date < today ? ' late' : ''}` }),
+              h('div', { class: 'mail-text' }, h('div', { class: 'mail-top' }, t.title), h('div', { class: 'mail-sub' }, `${t.project_name} · ${t.column_name}`)),
+              t.due_date ? h('span', { class: `mail-time${t.due_date < today ? ' late' : ''}` }, formatDate(t.due_date)) : null,
+            ),
+          ),
+        );
+      }
+      body.replaceChildren(...(rows.length ? rows : [h('div', { class: 'drawer-note empty-inbox' }, 'Писем нет. Здесь появятся задачи, назначенные тебе, и комментарии к ним.')]));
+      localStorage.setItem(SEEN_KEY, String(Date.now()));
+      const badge = document.querySelector('.mail-btn .badge');
+      if (badge) badge.remove();
+    } catch {
+      body.replaceChildren(h('div', { class: 'drawer-note' }, 'Не удалось загрузить'));
+    }
+  }
+
+  async function loadBadge(btn) {
+    try {
+      const data = await api.get('/api/inbox');
+      const today = todayIso();
+      const n = data.comments.filter((c) => c.created_at > lastSeen()).length + data.tasks.filter((t) => t.due_date && t.due_date < today).length;
+      if (n && btn.isConnected && !btn.querySelector('.badge')) btn.append(h('span', { class: 'badge' }, n > 9 ? '9+' : String(n)));
+    } catch {
+      /* без значка */
+    }
+  }
+
+  // ---------- профиль ----------
+
+  function openProfile(anchor) {
+    const order = ['auto', 'light', 'dark'];
+    const names = { auto: 'как в системе', light: 'светлая', dark: 'тёмная' };
+    closeInbox();
+    openMenu(anchor, [
+      { label: state.user.name, disabled: true, onClick() {} },
+      '-',
+      {
+        label: `Тема: ${names[themeStore.get()]}`,
+        onClick() {
+          const next = order[(order.indexOf(themeStore.get()) + 1) % order.length];
+          themeStore.set(next);
+          applyTheme(next);
+          toast(THEME_TEXT[next]);
+        },
+      },
+      '-',
+      { label: 'Выйти', danger: true, onClick: logout },
+    ]);
+    if (menuEl) menuEl.classList.add('right');
   }
 
   function topbar(crumbs) {
+    const mail = state.user ? h('button', { class: 'icon-btn mail-btn', title: 'Входящие', 'aria-label': 'Входящие', onclick: (e) => openInbox(e.currentTarget) }, icon('mail')) : null;
+    if (mail) loadBadge(mail);
+    const profile = state.user
+      ? h('button', { class: 'profile-btn', title: state.user.name, 'aria-label': 'Профиль', onclick: (e) => openProfile(e.currentTarget) }, avatar(state.user.name))
+      : null;
     return h(
       'header',
       { class: 'topbar' },
+      state.user ? h('button', { class: 'icon-btn', title: 'Меню', 'aria-label': 'Открыть меню', onclick: openDrawer }, icon('menu')) : null,
       h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly')),
-      h(
-        'nav',
-        { class: 'crumbs' },
-        crumbs.map((c) => [h('span', null, '/'), c.href ? h('a', { href: c.href }, c.label) : h('span', { class: 'current' }, c.label)]),
-      ),
-      themeButton(),
-      state.user ? h('span', { class: 'me' }, avatar(state.user.name), h('span', { class: 'name-text' }, state.user.name)) : null,
-      state.user ? h('button', { class: 'btn ghost small', onclick: logout }, 'Выйти') : null,
+      h('nav', { class: 'crumbs' }, crumbs.map((c) => [h('span', null, '/'), c.href ? h('a', { href: c.href }, c.label) : h('span', { class: 'current' }, c.label)])),
+      mail,
+      profile,
     );
   }
 
@@ -1246,6 +1392,7 @@
       cleanup = null;
     }
     closeMenu();
+    closeInbox();
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
     if (!state.user) return viewAuth();
     const hash = location.hash || '#/';
