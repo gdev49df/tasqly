@@ -1358,6 +1358,32 @@
 
   // ---------- главная: пространства ----------
 
+  // подсказки для новичка: четыре шага на главной, пока не пройдены или не скрыты
+  function onboarding(workspaces, focusCreate) {
+    let off = false;
+    try { off = localStorage.getItem('tq_onb_off') === '1'; } catch { /* нет хранилища */ }
+    if (off) return null;
+    const sum = (k) => workspaces.reduce((acc, w) => acc + (w[k] || 0), 0);
+    const first = workspaces[0];
+    const steps = [
+      ['Создай пространство', 'Место для проектов, заметок и чата команды.', workspaces.length > 0, 'Создать', focusCreate],
+      ['Создай проект', 'Например «Запуск сайта» или «Контент-план».', sum('projects') > 0, 'Открыть пространство', first ? () => { location.hash = `#/w/${first.id}`; } : null],
+      ['Добавь первую задачу', 'Нажми «+» вверху и выбери «Задачу».', sum('tasks') > 0, 'Открыть пространство', first ? () => { location.hash = `#/w/${first.id}`; } : null],
+      ['Пригласи человека', 'Ссылка-приглашение лежит на странице пространства.', workspaces.some((w) => (w.members || 0) > 1), 'Получить ссылку', first ? () => { location.hash = `#/w/${first.id}`; } : null],
+    ];
+    const done = steps.filter((x) => x[2]).length;
+    if (done === steps.length) return null;
+    const current = steps.findIndex((x) => !x[2]);
+    const check = (ok) => { const sp = h('span', { class: `onb-ck${ok ? ' on' : ''}` }); sp.innerHTML = ok ? '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10.5l3.2 3.2L15 6.8"/></svg>' : ''; return sp; };
+    return h('div', { class: 'onb' },
+      h('div', { class: 'onb-head' }, h('div', null, h('b', null, 'Начало работы'), h('span', null, `${done} из ${steps.length} шагов`)),
+        h('button', { class: 'btn ghost small', onclick: () => { try { localStorage.setItem('tq_onb_off', '1'); } catch { /* нет хранилища */ } route(); } }, 'Скрыть')),
+      h('div', { class: 'progress' }, h('span', { style: `width:${Math.round((done / steps.length) * 100)}%` })),
+      h('div', { class: 'onb-list' }, steps.map(([t, d, ok, label, act], i) =>
+        h('div', { class: `onb-step${ok ? ' done' : ''}${i === current ? ' now' : ''}` }, check(ok), h('div', { class: 'onb-t' }, h('b', null, t), h('span', null, d)),
+          i === current && act ? h('button', { class: 'btn small', onclick: act }, label) : null))));
+  }
+
   async function viewHome() {
     document.title = 'tasqly';
     const warm = cacheGet('/api/workspaces');
@@ -1409,6 +1435,7 @@
         h('div', { class: 'home-hero' },
           h('h1', null, `${hello}, `, h('em', { class: 'wave-u' }, state.user.name)),
           h('p', { class: 'sub' }, workspaces.length ? 'Выбери пространство, чтобы продолжить работу.' : 'Создай первое пространство для своей команды.')),
+        onboarding(workspaces, () => nameInput.focus()),
         workspaces.length
           ? h('div', { class: 'home-stats' }, stat(workspaces.length, 'пространство', 'пространства', 'пространств'), stat(sum('projects'), 'проект', 'проекта', 'проектов'), stat(sum('my_open'), 'моя открытая задача', 'моих открытых задачи', 'моих открытых задач'))
           : null,

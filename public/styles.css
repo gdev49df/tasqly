@@ -1759,3 +1759,22 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .trial-banner span:not(.trial-dot) { color: var(--muted); font-size: 13.5px; }
 .trial-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 5px color-mix(in srgb, var(--lime) 30%, transparent); }
 @media (max-width: 560px) { .trial-banner { flex-wrap: wrap; } }
+
+/* v8.8: подсказки при первом входе */
+.onb { border: 1px solid var(--border); border-radius: 18px; background: var(--bg-subtle); padding: 18px 20px 8px; margin-bottom: 22px; }
+.onb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.onb-head > div { display: grid; gap: 2px; }
+.onb-head b { font-size: 16px; letter-spacing: -0.02em; }
+.onb-head span { color: var(--muted); font-size: 13.5px; }
+.onb-list { margin-top: 6px; }
+.onb-step { display: flex; align-items: center; gap: 14px; padding: 12px 0; }
+.onb-step + .onb-step { border-top: 1px solid var(--border); }
+.onb-ck { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1.6px solid var(--border-strong); display: grid; place-items: center; color: #101300; transition: background .25s, border-color .25s; }
+.onb-ck.on { background: var(--lime); border-color: var(--lime); }
+.onb-step.now .onb-ck { border-color: var(--text); }
+.onb-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.onb-t b { font-weight: 600; }
+.onb-t span { color: var(--muted); font-size: 13.5px; }
+.onb-step.done .onb-t b { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.onb-step:not(.now):not(.done) { opacity: .6; }
+@media (max-width: 560px) { .onb-step { flex-wrap: wrap; } .onb-step .btn { margin-left: 38px; } }

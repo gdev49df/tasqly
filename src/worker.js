@@ -440,6 +440,7 @@ route('GET', '/api/workspaces', async ({ env, user }) => {
     `SELECT w.id, w.name, m.role,
        (SELECT COUNT(*) FROM projects p WHERE p.workspace_id = w.id) AS projects,
        (SELECT COUNT(*) FROM members x WHERE x.workspace_id = w.id) AS members,
+       (SELECT COUNT(*) FROM tasks t2 JOIN projects p2 ON p2.id = t2.project_id WHERE p2.workspace_id = w.id) AS tasks,
        (SELECT COUNT(*) FROM tasks t JOIN projects p ON p.id = t.project_id JOIN columns c ON c.id = t.column_id
          WHERE p.workspace_id = w.id AND t.assignee_id = ? AND c.is_done = 0) AS my_open
      FROM workspaces w
