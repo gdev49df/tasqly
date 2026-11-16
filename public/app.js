@@ -841,7 +841,7 @@
         { class: 'land-nav' },
         logo,
         h('span', { class: 'grow' }),
-        h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'features'], ['Учёт времени', 'features'], ['AI tasqly', 'features']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать'), h('button', { onclick: to('pricing') }, 'Тарифы')),
+        h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'roles'], ['Учёт времени', 'sc-time'], ['AI tasqly', 'ai']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать'), h('button', { onclick: to('pricing') }, 'Тарифы')),
         ...(state.user
           ? [h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет')]
           : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: '/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: PANEL + '#/register' }, 'Начать сейчас')]),
@@ -967,8 +967,23 @@
     const showcase = [
       ['Время', 'Видно, куда уходят часы', 'Таймер включается прямо в задаче. По окончании время записывается, и сразу видно, сколько ушло против оценки и кто сколько работал.', mockTime],
       ['Обзор', 'Весь проект на одном экране', 'Процент готовности, просрочки, нагрузка на команду и ближайшие сроки. Открыл и понял, где проект, без отчётов.', mockOverview],
-      ['AI', 'Помощник знает твои задачи', 'Спроси «что горит» и получишь ответ по твоим данным. Он же разобьёт большую задачу на шаги и соберёт план на день.', mockAi],
-    ].map(([tag, title, text, mock], i) => h('div', { class: `sc-row${i % 2 ? ' flip' : ''}` }, h('div', { class: 'sc-copy reveal' }, h('span', { class: 'sc-tag' }, tag), h('h3', null, title), h('p', null, text)), mock));
+    ].map(([tag, title, text, mock], i) => h('div', { class: `sc-row${i % 2 ? ' flip' : ''}`, id: i === 0 ? 'sc-time' : null }, h('div', { class: 'sc-copy reveal' }, h('span', { class: 'sc-tag' }, tag), h('h3', null, title), h('p', null, text)), mock));
+
+    const aiPrompts = ['Что горит на этой неделе?', 'Собери план на сегодня', 'Кто перегружен?', 'Разбей задачу на шаги', 'Текст встречи в задачи'];
+    const aiSection = h('section', { class: 'land-sec wide', id: 'ai' }, h('div', { class: 'ai-sec' },
+      h('div', { class: 'ai-sec-copy reveal' },
+        h('span', { class: 'sc-tag' }, 'AI tasqly'),
+        h('h2', null, 'Помощник, который знает твои задачи'),
+        h('p', null, 'Спроси «что горит» и получишь ответ по данным твоего пространства. Он разобьёт большую задачу на шаги, соберёт план на день и превратит текст встречи в список задач.'),
+        h('div', { class: 'ai-chips' }, aiPrompts.map((t) => h('span', null, t))),
+        h('ul', { class: 'ai-facts' },
+          h('li', null, 'Отвечает только про задачи и проекты, без лишней болтовни'),
+          h('li', null, 'До 40 запросов в день на человека'),
+          h('li', null, 'Открывается из любого экрана: кнопка AI сверху или на весь экран')),
+        h('div', { class: 'ai-sec-cta' }, h('a', { class: 'btn big', href: state.user ? PANEL : '/register' }, state.user ? 'Открыть кабинет' : 'Попробовать')),
+      ),
+      h('div', { class: 'ai-sec-mock reveal' }, mockAi),
+    ));
 
     // ---------- роли: карусель карточек, сама ходит из стороны в сторону ----------
     const miniRing = (pct, color, num) => { const r = 24, c = 2 * Math.PI * r; return svgEl(`<svg viewBox="0 0 64 64" width="62" height="62"><circle cx="32" cy="32" r="${r}" fill="none" stroke="var(--border)" stroke-width="6"/><circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - pct / 100)).toFixed(1)}" transform="rotate(-90 32 32)"/></svg><b>${num}</b>`, 'rc-ring'); };
@@ -1094,6 +1109,7 @@
           demo,
         ),
         h('section', { class: 'land-sec', id: 'showcase' }, h('h2', null, 'Не просто доска: всё для работы рядом'), h('div', { class: 'sc' }, showcase)),
+        aiSection,
         h('section', { class: 'land-sec wide', id: 'roles' }, rolesBox),
         h('section', { class: 'land-sec', id: 'tabs' }, h('h2', null, 'tasqly подстраивается под твои задачи'), tabsBox),
         h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('div', { class: 'bento' }, features.map(([t, d], i) => h('div', { class: 'bento-cell reveal', style: `transition-delay:${(i % 4) * 70}ms` }, h('span', { class: 'bento-ic', 'aria-hidden': 'true' }, svgEl(`<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${FIC[i]}</svg>`)), h('b', null, t), h('span', null, d))))),

@@ -1532,3 +1532,16 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .sel-opt.on .sel-ck { opacity: 1; transform: none; }
 @keyframes sel-in { from { opacity: 0; transform: scale(.96) translateY(-6px); } }
 @media (prefers-reduced-motion: reduce) { .sel-pop { animation: none; } }
+
+/* v7.1: отдельная секция AI */
+.ai-sec { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: center; padding: 40px; border: 1px solid var(--border); border-radius: 24px; background: linear-gradient(180deg, var(--bg-subtle), var(--bg)); position: relative; overflow: hidden; }
+.ai-sec::before { content: ''; position: absolute; width: 320px; height: 320px; right: -80px; top: -120px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--lime) 30%, transparent), transparent 70%); pointer-events: none; }
+.ai-sec > * { position: relative; min-width: 0; }
+.ai-sec h2 { font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.04em; line-height: 1.1; margin: 10px 0 14px; }
+.ai-sec-copy > p { color: var(--muted); font-size: 16.5px; line-height: 1.6; margin: 0 0 20px; max-width: 48ch; }
+.ai-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+.ai-chips span { border: 1px solid var(--border-strong); border-radius: 99px; padding: 7px 13px; font-size: 13.5px; background: var(--bg); }
+.ai-facts { list-style: none; padding: 0; margin: 0 0 26px; display: grid; gap: 9px; color: var(--muted); font-size: 14.5px; }
+.ai-facts li { padding-left: 24px; position: relative; }
+.ai-facts li::before { content: '✓'; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--lime); color: var(--lime-ink); font-size: 10px; display: grid; place-items: center; top: 2px; }
+@media (max-width: 860px) { .ai-sec { grid-template-columns: 1fr; padding: 26px 20px; gap: 28px; } }
