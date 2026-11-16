@@ -1,5 +1,5 @@
 // tasqly: сервис-воркер. оболочка кешируется, api всегда идёт в сеть
-const CACHE = "tasqly-v36";
+const CACHE = "tasqly-v37";
 const SHELL = ['/', '/404.html', '/panel/', '/styles.css', '/app.js', '/config.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
