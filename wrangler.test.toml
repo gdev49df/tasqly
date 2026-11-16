@@ -12,6 +12,7 @@ not_found_handling = "404-page"
 # сайты, которым разрешено ходить в api (через запятую)
 [vars]
 AI_MOCK = "1"
+MAIL_MOCK = "1"
 ALLOWED_ORIGINS = "https://gdev49df.github.io"
 
 [[d1_databases]]

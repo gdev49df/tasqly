@@ -570,6 +570,26 @@ ok('удаление пространства: только владелец');
   assert.equal(r.data.members.find((m) => m.id === bobId).role_name, 'Администратор');
 }
 ok('роли: наблюдатель, свои роли, администратор, выход и удаление участников');
+{
+  const fc = client();
+  const mail = `reset${run}@test.dev`;
+  await fc('POST', '/api/auth/register', { email: mail, name: 'Забыла', password: 'password123' });
+  r = await client()('POST', '/api/auth/forgot', { email: `nobody${run}@test.dev` });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.debug_token, undefined, 'для несуществующего email ничего не раскрывается');
+  r = await client()('POST', '/api/auth/forgot', { email: mail });
+  const tok = r.data.debug_token;
+  assert.match(tok, /^[0-9a-f]{64}$/);
+  assert.equal((await client()('POST', '/api/auth/forgot', { email: mail })).data.debug_token, undefined, 'частые запросы не создают новый токен');
+  assert.equal((await client()('POST', '/api/auth/reset', { token: 'x'.repeat(64), password: 'newpassword1' })).status, 400);
+  assert.equal((await client()('POST', '/api/auth/reset', { token: tok, password: 'short' })).status, 400);
+  assert.equal((await client()('POST', '/api/auth/reset', { token: tok, password: 'newpassword1' })).status, 200);
+  assert.equal((await client()('POST', '/api/auth/reset', { token: tok, password: 'another-pass1' })).status, 400, 'токен одноразовый');
+  assert.equal((await fc('GET', '/api/me')).status, 401, 'старые сессии завершены');
+  assert.equal((await client()('POST', '/api/auth/login', { email: mail, password: 'password123' })).status, 401);
+  assert.equal((await client()('POST', '/api/auth/login', { email: mail, password: 'newpassword1' })).status, 200);
+}
+ok('сброс пароля: письмо, одноразовая ссылка, новый пароль, старые сессии закрыты');
 ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
 
 // лимиты на количество объектов

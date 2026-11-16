@@ -1464,6 +1464,61 @@
     render(nav, h('main', { class: 'pg' }, ...body), foot);
   }
 
+  // забыл пароль: письмо со ссылкой
+  function viewForgot(external) {
+    document.title = 'Сброс пароля · tasqly';
+    const error = h('div', { class: 'error' });
+    const email = h('input', { type: 'email', name: 'email', autocomplete: 'email', 'aria-label': 'Email' });
+    const btn = h('button', { class: 'btn', style: 'width:100%;margin-top:6px', type: 'submit' }, 'Отправить ссылку');
+    const form = h('form', { novalidate: true }, h('p', { class: 'sub', style: 'margin:0 0 4px' }, 'Укажи email аккаунта, мы отправим ссылку для нового пароля.'), h('label', { class: 'field' }, 'Email'), email, error, btn);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) return (error.textContent = 'Проверь email');
+      btn.disabled = true;
+      try {
+        await api.post('/api/auth/forgot', { email: email.value.trim() });
+        form.replaceChildren(h('p', { class: 'sub', style: 'margin:0 0 8px' }, 'Если такой аккаунт есть, письмо уже в пути. Ссылка действует час. Проверь и папку «Спам».'), h('button', { class: 'btn ghost', type: 'button', style: 'width:100%', onclick: () => viewAuth('login') }, 'Вернуться ко входу'));
+      } catch (err) {
+        error.textContent = err.message;
+        btn.disabled = false;
+      }
+    });
+    render(h('div', { class: 'auth' }, logoEl(), h('div', { class: 'tag' }, 'Сброс пароля'), h('div', { class: 'card' }, form), h('button', { type: 'button', class: 'auth-back link-btn', onclick: () => viewAuth('login') }, '← Ко входу')));
+    email.focus();
+  }
+
+  // новый пароль по ссылке из письма
+  function viewReset(token) {
+    document.title = 'Новый пароль · tasqly';
+    const error = h('div', { class: 'error' });
+    const a = passwordField({ name: 'p1', autocomplete: 'new-password', 'aria-label': 'Новый пароль' });
+    const b = passwordField({ name: 'p2', autocomplete: 'new-password', 'aria-label': 'Повтори пароль' });
+    const btn = h('button', { class: 'btn', style: 'width:100%;margin-top:6px', type: 'submit' }, 'Сохранить пароль');
+    const form = h('form', { novalidate: true }, h('label', { class: 'field' }, 'Новый пароль'), a, h('div', { class: 'sub', style: 'margin:6px 0 0;font-size:12px' }, 'Минимум 8 символов'), h('label', { class: 'field' }, 'Повтори пароль'), b, error, btn);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      const v1 = a.querySelector('input').value;
+      if (v1.length < 8) return (error.textContent = 'Минимум 8 символов');
+      if (v1 !== b.querySelector('input').value) return (error.textContent = 'Пароли не совпадают');
+      btn.disabled = true;
+      try {
+        await api.post('/api/auth/reset', { token, password: v1 });
+        tokenStore.set('');
+        state.user = null;
+        try { localStorage.removeItem('tq_user'); } catch { /* нет хранилища */ }
+        history.replaceState(null, '', `${location.pathname}#/login`);
+        viewAuth('login');
+        toast('Пароль изменён. Войди с новым паролем');
+      } catch (err) {
+        error.textContent = err.message;
+        btn.disabled = false;
+      }
+    });
+    render(h('div', { class: 'auth' }, logoEl(), h('div', { class: 'tag' }, 'Придумай новый пароль'), h('div', { class: 'card' }, form)));
+  }
+
   function viewAuth(initialMode = 'login', opts = {}) {
     document.title = initialMode === 'register' ? 'Регистрация · tasqly' : 'Вход · tasqly';
     destroyDock();
@@ -1488,6 +1543,7 @@
         ...(mode === 'register' ? [h('div', { class: 'sub', style: 'margin:6px 0 0;font-size:12px' }, 'Минимум 8 символов')] : []),
         error,
         h('button', { class: 'btn', style: 'width:100%;margin-top:6px', type: 'submit' }, mode === 'login' ? 'Войти' : 'Создать аккаунт'),
+        ...(mode === 'login' ? [h('button', { type: 'button', class: 'link-btn', onclick: () => viewForgot(external) }, 'Забыл пароль?')] : []),
       );
       error.textContent = '';
     }
@@ -3698,6 +3754,8 @@
     }
     const shareHash = hash.match(/^#\/share\/([0-9a-f]{32})$/);
     if (shareHash) return viewShared(shareHash[1]);
+    const resetHash = hash.match(/^#\/reset\/([0-9a-f]{64})$/);
+    if (resetHash) return viewReset(resetHash[1]);
     const joinHash = hash.match(/^#\/join\/([A-Za-z0-9]{3,20})$/);
     if (!state.user) {
       if (joinHash) {

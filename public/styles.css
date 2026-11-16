@@ -1850,3 +1850,8 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .role-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .role-row .role-badge { flex: none; min-width: 0; }
 .role-row .sub { margin: 0; }
+
+/* v9.7 забыл пароль */
+.link-btn { background: none; border: 0; padding: 0; margin-top: 14px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; display: block; text-align: center; width: 100%; }
+.link-btn:hover { color: var(--text); }
+.auth-back.link-btn { text-decoration: none; margin-top: 18px; }

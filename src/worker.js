@@ -475,6 +475,80 @@ route('POST', '/api/auth/password', async ({ env, req, user, body }) => {
   return json({ ok: true });
 });
 
+// ---------- сброс пароля по почте (Resend) ----------
+
+async function sendMail(env, to, subject, html) {
+  if (!env.RESEND_API_KEY) {
+    console.error('почта не настроена: нет RESEND_API_KEY, письмо не отправлено');
+    return false;
+  }
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ from: env.MAIL_FROM || 'tasqly <onboarding@resend.dev>', to: [to], subject, html }),
+    });
+    if (!res.ok) console.error('resend:', res.status, (await res.text()).slice(0, 300));
+    return res.ok;
+  } catch (e) {
+    console.error('resend failed', e);
+    return false;
+  }
+}
+const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+route(
+  'POST',
+  '/api/auth/forgot',
+  async ({ env, req, body }) => {
+    const email = cleanString(body.email, 'email', { max: 120 }).toLowerCase();
+    const out = { ok: true };
+    const u = await env.DB.prepare('SELECT id, name FROM users WHERE email = ?').bind(email).first();
+    if (u) {
+      // не чаще одного письма в минуту на аккаунт
+      const last = await env.DB.prepare('SELECT MAX(created_at) AS t FROM password_resets WHERE user_id = ?').bind(u.id).first();
+      if (!last.t || now() - last.t > 60_000) {
+        const token = randomHex(32);
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?').bind(u.id, now()),
+          env.DB.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)').bind(await sha256(token), u.id, now() + 3600_000, now()),
+        ]);
+        const link = `${new URL(req.url).origin}/panel/#/reset/${token}`;
+        if (env.MAIL_MOCK) out.debug_token = token;
+        else {
+          await sendMail(
+            env,
+            email,
+            'Сброс пароля tasqly',
+            `<div style="font-family:system-ui,sans-serif;max-width:480px;line-height:1.5;color:#111"><h2 style="margin:0 0 12px">Сброс пароля</h2><p>Привет, ${escHtml(u.name)}! Чтобы задать новый пароль, нажми на кнопку. Ссылка действует час.</p><p><a href="${link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600">Задать новый пароль</a></p><p style="color:#666;font-size:13px">Если ты не просил сброс, просто проигнорируй письмо: пароль останется прежним.</p></div>`,
+          );
+        }
+      }
+    }
+    return json(out);
+  },
+  { auth: false },
+);
+
+route(
+  'POST',
+  '/api/auth/reset',
+  async ({ env, body }) => {
+    const token = cleanString(body.token, 'токен', { max: 100 });
+    const password = cleanString(body.password, 'пароль', { min: 8, max: 200 });
+    const row = await env.DB.prepare('SELECT user_id, expires_at FROM password_resets WHERE token_hash = ?').bind(await sha256(token)).first();
+    if (!row || row.expires_at < now()) fail(400, 'ссылка недействительна или устарела, запроси новую');
+    const { hash, salt } = await hashPassword(password);
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET pass_hash = ?, pass_salt = ? WHERE id = ?').bind(hash, salt, row.user_id),
+      env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(row.user_id),
+      env.DB.prepare('DELETE FROM password_resets WHERE user_id = ?').bind(row.user_id),
+    ]);
+    return json({ ok: true });
+  },
+  { auth: false },
+);
+
 // входящие: мои незавершённые задачи и свежие комментарии других людей к моим задачам
 route('GET', '/api/inbox', async ({ env, user }) => {
   const tasks = await env.DB.prepare(
