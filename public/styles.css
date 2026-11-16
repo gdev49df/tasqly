@@ -1652,3 +1652,5 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 /* v8.1: линия под буквами, не по ним */
 .hero h1 em.wave::after { bottom: -.3em; transform: rotate(-.8deg); }
 .hero h1 { margin-bottom: 26px; }
+/* текст для поисковиков, пока не загрузился скрипт: не мигает у людей */
+[data-seo] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
