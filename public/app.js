@@ -117,6 +117,7 @@
   const API_BASE = String(window.TASQLY_API || '').replace(/\/$/, '');
 
   async function api(method, path, body) {
+    if (method !== 'GET') cacheClear();
     const headers = {};
     if (body !== undefined) headers['content-type'] = 'application/json';
     const token = tokenStore.get();
@@ -135,6 +136,7 @@
     }
     if (res.status === 401) {
       tokenStore.set('');
+      try { localStorage.removeItem('tq_user'); } catch { /* нет хранилища */ }
       if (state.user) {
         state.user = null;
         route();
@@ -145,6 +147,29 @@
     return data;
   }
   api.get = (p) => api('GET', p);
+
+  // мгновенный показ: последний ответ берём из памяти браузера, свежий подтягиваем фоном
+  let cacheEpoch = 0;
+  const cacheKey = (p) => `tq_c:${state.user ? state.user.id : ''}:${p}`;
+  const cacheGet = (p) => { try { const v = localStorage.getItem(cacheKey(p)); return v ? JSON.parse(v) : null; } catch { return null; } };
+  const cacheSet = (p, d) => { try { const j = JSON.stringify(d); if (j.length < 300000) localStorage.setItem(cacheKey(p), j); } catch { /* хранилище недоступно */ } };
+  function cacheClear() {
+    cacheEpoch++;
+    try { Object.keys(localStorage).filter((k) => k.startsWith('tq_c:')).forEach((k) => localStorage.removeItem(k)); } catch { /* нет хранилища */ }
+  }
+  const isTyping = () => { const a = document.activeElement; return !!a && (['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName) || a.isContentEditable); };
+  let quietRoute = false;
+  api.fast = (path) => {
+    const hit = cacheGet(path);
+    const epoch = cacheEpoch;
+    const startHash = location.hash;
+    const fresh = api.get(path).then((d) => { if (epoch === cacheEpoch) cacheSet(path, d); return d; });
+    if (!hit) return fresh;
+    fresh.then((d) => {
+      if (epoch === cacheEpoch && JSON.stringify(d) !== JSON.stringify(hit) && location.hash === startHash && !isTyping()) { quietRoute = true; route(); }
+    }).catch(() => {});
+    return Promise.resolve(hit);
+  };
   api.post = (p, b = {}) => api('POST', p, b);
   api.put = (p, b) => api('PUT', p, b);
   api.patch = (p, b) => api('PATCH', p, b);
@@ -156,6 +181,8 @@
     for (const ch of n) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
     return h('span', { class: 'avatar', title: n, style: `background:${AVATAR_COLORS[hash % AVATAR_COLORS.length]}` }, n.trim().charAt(0).toUpperCase());
   }
+
+  function saveUser() { try { localStorage.setItem('tq_user', JSON.stringify(state.user)); } catch { /* нет хранилища */ } }
 
   // пробный период «Команды»: 5 дней у новых аккаунтов; null у старых
   function trialState() {
@@ -866,6 +893,8 @@
       /* всё равно выходим */
     }
     tokenStore.set('');
+    try { localStorage.removeItem('tq_user'); } catch { /* нет хранилища */ }
+    cacheClear();
     state.user = null;
     state.timer = null;
     state.timerLoaded = false;
@@ -1295,6 +1324,7 @@
       try {
         const res = await api.post(mode === 'login' ? '/api/auth/login' : '/api/auth/register', data);
         state.user = res.user;
+        saveUser();
         if (external) { location.href = PANEL; return; }
         if (location.hash === '#/') route();
         else location.hash = '#/';
@@ -1321,8 +1351,9 @@
 
   async function viewHome() {
     document.title = 'tasqly';
-    render(topbar([{ label: 'Пространства' }]), h('div', { class: 'container' }, h('div', { class: 'empty' }, 'Загрузка…')));
-    const { workspaces } = await api.get('/api/workspaces');
+    const warm = cacheGet('/api/workspaces');
+    if (!warm) render(topbar([{ label: 'Пространства' }]), h('div', { class: 'container' }));
+    const { workspaces } = await api.fast('/api/workspaces');
     if (workspaces.length && !workspaces.some((w) => w.id === lastWsStore.get())) setAiContext(workspaces[0].id, '', `пространство «${workspaces[0].name}»`);
 
     const nameInput = h('input', { type: 'text', placeholder: 'Название пространства', maxlength: 80 });
@@ -1398,6 +1429,7 @@
     render(topbar([{ label: 'Пространства', href: '#/' }, { label: 'Профиль' }]), h('div', { class: 'container' }, h('div', { class: 'empty' }, 'Загрузка…')));
     const [{ user }, usage, { workspaces }] = await Promise.all([api.get('/api/me'), api.get('/api/me/usage'), api.get('/api/workspaces')]);
     state.user = { ...state.user, ...user };
+    saveUser();
     const sum = (k) => workspaces.reduce((acc, w) => acc + (w[k] || 0), 0);
     const since = user.created_at ? new Date(user.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
     const hue = (() => { let hs = 0; for (const ch of user.name) hs = (hs * 31 + ch.codePointAt(0)) >>> 0; return hs; })();
@@ -1477,7 +1509,7 @@
 
   async function viewWorkspace(id, tab = 'projects') {
     if (!WS_TABS.some(([k]) => k === tab)) tab = 'projects';
-    const data = await api.get(`/api/workspaces/${id}`);
+    const data = await api.fast(`/api/workspaces/${id}`);
     const { workspace } = data;
     document.title = `${workspace.name} · tasqly`;
     setAiContext(id, '', `пространство «${workspace.name}»`);
@@ -2042,7 +2074,7 @@
   // ---------- проект ----------
 
   async function viewProject(id) {
-    const S = await api.get(`/api/projects/${id}`);
+    const S = await api.fast(`/api/projects/${id}`);
     document.title = `${S.project.name} · tasqly`;
     setAiContext(S.project.workspace_id, id, `проект «${S.project.name}»`);
 
@@ -3102,6 +3134,7 @@
 
   // ---------- маршрутизация ----------
 
+  let firstShow = true;
   async function route() {
     if (cleanup) {
       cleanup();
@@ -3112,8 +3145,10 @@
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
     // плавное появление нового экрана
     app.classList.remove('page-enter');
-    void app.offsetWidth;
-    app.classList.add('page-enter');
+    if (firstShow || quietRoute) { firstShow = false; quietRoute = false; } else {
+      void app.offsetWidth;
+      app.classList.add('page-enter');
+    }
     const hash = location.hash || '#/';
     if (!IN_PANEL) {
       const path = location.pathname.replace(/\/+$/, '');
@@ -3288,8 +3323,25 @@
   window.addEventListener('hashchange', route);
 
   (async () => {
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem('tq_user') || 'null'); } catch { /* нет хранилища */ }
+    const token = tokenStore.get();
+    if (!token) { state.user = null; return route(); } // гость: ждать сеть незачем
+    if (cached) {
+      // уже входили: показываем сразу, а профиль сверяем фоном
+      state.user = cached;
+      route();
+      api.get('/api/me').then(({ user }) => {
+        const changed = JSON.stringify(user) !== JSON.stringify(state.user);
+        state.user = user;
+        saveUser();
+        if (changed && !isTyping()) { quietRoute = true; route(); }
+      }).catch(() => {});
+      return;
+    }
     try {
       state.user = (await api.get('/api/me')).user;
+      saveUser();
     } catch {
       state.user = null;
     }
