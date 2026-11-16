@@ -1421,6 +1421,7 @@
       clearTimeout(saveTimer);
       saveTimer = setTimeout(flush, 700);
     };
+    const prevCleanup = cleanup;
     cleanup = () => {
       flush();
       if (prevCleanup) prevCleanup();
@@ -1576,6 +1577,7 @@
     });
     poll();
     const timer = setInterval(() => !document.hidden && poll(), 3000);
+    const prevCleanup = cleanup;
     cleanup = () => {
       clearInterval(timer);
       if (prevCleanup) prevCleanup();
