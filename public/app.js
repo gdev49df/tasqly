@@ -395,7 +395,7 @@
                 ),
               ),
             )
-          : h('div', { class: 'card empty' }, 'Проектов пока нет'),
+          : h('div', { class: 'card empty' }, 'Проектов пока нет. Создай первый кнопкой выше.'),
         h('div', { class: 'spacer' }),
         h('div', { class: 'row' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Добавить проект')),
         h('div', { class: 'spacer' }),
