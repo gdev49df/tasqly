@@ -581,6 +581,12 @@
   }
 
     // логотип: знак «q» на акцентном фоне + слово
+  const PLANS = [
+    { name: 'Старт', price: '0 ₸', per: 'навсегда', text: 'Для одиночек и небольших дел.', items: ['Проекты и задачи', 'Заметки', 'Таймер времени', 'До 3 человек'] },
+    { name: 'Команда', price: '2 500 ₸', per: 'за человека в мес', text: 'Для команд, где важен контроль.', badge: 'Популярный', items: ['Всё из «Старт»', 'Чат и диск', 'Обзор и отчёты по времени', 'AI-помощник', 'Без ограничения по людям'] },
+    { name: 'Бизнес', price: 'по запросу', per: '', text: 'Для компаний со своими требованиями.', items: ['Всё из «Команда»', 'Помощь с запуском', 'Приоритетная поддержка', 'Свои условия'] },
+  ];
+
   function logoEl(attrs) {
     return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), h('span', { class: 'logo-word' }, 'tasqly'));
   }
@@ -834,7 +840,7 @@
         h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'features'], ['Учёт времени', 'features'], ['AI tasqly', 'features']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать'), h('button', { onclick: to('pricing') }, 'Тарифы')),
         ...(state.user
           ? [h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет')]
-          : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: PANEL + '#/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: PANEL + '#/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: PANEL + '#/register' }, 'Начать сейчас')]),
+          : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: '/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: PANEL + '#/register' }, 'Начать сейчас')]),
       );
     }
 
@@ -883,11 +889,33 @@
         () => h('div', { class: 'tv-ai' }, h('p', { class: 'me' }, 'Что горит на этой неделе?'), h('p', null, 'Две задачи требуют внимания: «Подключить оплату» просрочена, «Согласовать макеты» через 5 дней.'), h('div', { class: 'tv-chips' }, h('span', null, 'Назначить Данияра'), h('span', null, 'План на день')))],
     ];
     const tabsBox = h('div', { class: 'ftabs' });
-    const paintTabs = () => tabsBox.replaceChildren(
-      h('div', { class: 'ft-list', role: 'tablist' }, tabsData.map(([n, d], i) => h('button', { role: 'tab', class: i === tabIdx ? 'active' : '', 'aria-selected': String(i === tabIdx), onclick: () => { tabIdx = i; paintTabs(); } }, h('b', null, n), h('span', null, d)))),
-      h('div', { class: 'ft-view', key: tabIdx }, tabsData[tabIdx][2]()),
-    );
-    paintTabs();
+    const tabBtns = tabsData.map(([n, d], i) => h('button', { role: 'tab', onclick: () => selectTab(i) }, h('b', null, n), h('span', null, d)));
+    const ind = h('i', { class: 'ft-ind', 'aria-hidden': 'true' });
+    const tabList = h('div', { class: 'ft-list', role: 'tablist' }, ind, ...tabBtns);
+    const tabHolder = h('div', { class: 'ft-holder' });
+    tabsBox.append(tabList, tabHolder);
+    // инерционный маркер: пружина тянет лайм-полосу к активной вкладке, пока вкладки раскрываются
+    let indY = 0, indH = 0, vY = 0, vH = 0, indRaf = 0, indInit = false;
+    const stepInd = () => {
+      const b = tabBtns[tabIdx];
+      const ty = b.offsetTop, th = b.offsetHeight;
+      if (!indInit || calmMotion) { indY = ty; indH = th; vY = vH = 0; indInit = true; }
+      else { vY = (vY + (ty - indY) * 0.14) * 0.74; vH = (vH + (th - indH) * 0.14) * 0.74; indY += vY; indH += vH; }
+      ind.style.transform = `translateY(${indY.toFixed(2)}px)`;
+      ind.style.height = `${Math.max(0, indH).toFixed(2)}px`;
+      indRaf = (Math.abs(ty - indY) > 0.3 || Math.abs(th - indH) > 0.3 || Math.abs(vY) > 0.08 || Math.abs(vH) > 0.08) ? requestAnimationFrame(stepInd) : 0;
+    };
+    const runInd = () => { if (!indRaf) indRaf = requestAnimationFrame(stepInd); };
+    const onTabsResize = () => { indInit = false; runInd(); };
+    window.addEventListener('resize', onTabsResize);
+    function selectTab(i) {
+      const dir = i >= tabIdx ? 1 : -1;
+      tabIdx = i;
+      tabBtns.forEach((b, j) => { b.classList.toggle('active', j === i); b.setAttribute('aria-selected', String(j === i)); });
+      tabHolder.replaceChildren(h('div', { class: 'ft-view', style: `--dir:${dir}` }, tabsData[i][2]()));
+      runInd();
+    }
+    selectTab(tabIdx);
 
 
     // ---------- витрина: живые мини-экраны продукта ----------
@@ -990,11 +1018,6 @@
     rolesBox.addEventListener('touchstart', () => { autoOn = false; }, { passive: true });
 
     // ---------- тарифы (названия и цены меняются здесь) ----------
-    const PLANS = [
-      { name: 'Старт', price: '0 ₸', per: 'навсегда', text: 'Для одиночек и небольших дел.', items: ['Проекты и задачи', 'Заметки', 'Таймер времени', 'До 3 человек'] },
-      { name: 'Команда', price: '2 500 ₸', per: 'за человека в мес', text: 'Для команд, где важен контроль.', badge: 'Популярный', items: ['Всё из «Старт»', 'Чат и диск', 'Обзор и отчёты по времени', 'AI-помощник', 'Без ограничения по людям'] },
-      { name: 'Бизнес', price: 'по запросу', per: '', text: 'Для компаний со своими требованиями.', items: ['Всё из «Команда»', 'Помощь с запуском', 'Приоритетная поддержка', 'Свои условия'] },
-    ];
     const pricing = h('section', { class: 'land-sec', id: 'pricing' }, h('div', { class: 'pr' },
       h('div', { class: 'pr-copy reveal' }, h('h2', null, 'Тарифы под любой бюджет'), h('p', null, 'Начни бесплатно и переходи дальше, когда команда вырастет.'), h('div', { class: 'pr-from' }, h('b', null, `от ${PLANS[1].price}`), h('span', null, ' / мес за человека')), h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Подробнее')),
       h('div', { class: 'pr-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i} reveal`, style: `transition-delay:${i * 90}ms` }, pl.badge ? h('span', { class: 'pr-badge' }, pl.badge) : null, h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text), h('ul', null, pl.items.map((t) => h('li', null, t)))))),
@@ -1010,7 +1033,8 @@
         { class: 'lf-in' },
         h('div', { class: 'lf-brand' }, logoEl({ class: 'logo' }), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве. С AI-помощником, который знает ваши проекты.')),
         col('Продукт', [lf('Возможности', 'features'), lf('Проекты', 'kinds'), lf('Как начать', 'steps'), lf('Тарифы', 'pricing')]),
-        col('Аккаунт', state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: PANEL + '#/login' }, 'Войти'), h('a', { href: PANEL + '#/register' }, 'Создать пространство')]),
+        col('Аккаунт', state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: '/login' }, 'Войти'), h('a', { href: '/register' }, 'Создать пространство')]),
+        col('Документы', [h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты'), h('a', { href: '/privacy' }, 'Конфиденциальность'), h('a', { href: '/terms' }, 'Условия')]),
       ),
       h('div', { class: 'lf-bottom' }, h('span', null, `© ${new Date().getFullYear()} tasqly`), h('span', null, 'Сделано в Казахстане')),
     );
@@ -1041,7 +1065,7 @@
       io = new IntersectionObserver((entries) => entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { threshold: 0.25 });
       setTimeout(() => document.querySelectorAll('.land .reveal').forEach((el) => io.observe(el)), 0);
     } else setTimeout(() => document.querySelectorAll('.land .reveal').forEach((el) => el.classList.add('in')), 0);
-    cleanup = () => { window.removeEventListener('pointermove', onDragMove); window.removeEventListener('pointerup', onDragEnd); clearInterval(timerId); if (autoId) clearInterval(autoId); if (io) io.disconnect(); };
+    cleanup = () => { cancelAnimationFrame(indRaf); window.removeEventListener('resize', onTabsResize); window.removeEventListener('pointermove', onDragMove); window.removeEventListener('pointerup', onDragEnd); clearInterval(timerId); if (autoId) clearInterval(autoId); if (io) io.disconnect(); };
 
     render(
       h(
@@ -1078,18 +1102,73 @@
     );
   }
 
+  // ---------- отдельные публичные страницы: /pricing, /contacts, /privacy, /terms ----------
+  function viewPublicPage(kind) {
+    destroyDock();
+    const titles = { pricing: 'Тарифы', contacts: 'Контакты', privacy: 'Политика конфиденциальности', terms: 'Условия использования' };
+    document.title = `${titles[kind]} · tasqly`;
+    const cta = state.user ? h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет') : h('a', { class: 'btn small nav-cta', href: '/register' }, 'Начать сейчас');
+    const nav = h('header', { class: 'land-nav' }, logoEl(), h('span', { class: 'grow' }),
+      h('nav', { class: 'land-links' }, h('a', { class: 'nav-link', href: '/pricing' }, 'Тарифы'), h('a', { class: 'nav-link', href: '/contacts' }, 'Контакты')),
+      ...(state.user ? [] : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '/login' }, 'Войти')]), cta);
+    const foot = h('footer', { class: 'land-foot' },
+      h('div', { class: 'lf-in' },
+        h('div', { class: 'lf-brand' }, logoEl(), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве.')),
+        h('div', { class: 'lf-col' }, h('b', null, 'Продукт'), h('a', { href: '/' }, 'Главная'), h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты')),
+        h('div', { class: 'lf-col' }, h('b', null, 'Аккаунт'), ...(state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: '/login' }, 'Войти'), h('a', { href: '/register' }, 'Создать пространство')])),
+        h('div', { class: 'lf-col' }, h('b', null, 'Документы'), h('a', { href: '/privacy' }, 'Конфиденциальность'), h('a', { href: '/terms' }, 'Условия')),
+      ),
+      h('div', { class: 'lf-bottom' }, h('span', null, `© ${new Date().getFullYear()} tasqly`), h('span', null, 'Сделано в Казахстане')));
+
+    let body;
+    if (kind === 'pricing') {
+      const rows = [
+        ['Проекты и задачи', true, true, true], ['Заметки', true, true, true], ['Таймер времени', true, true, true],
+        ['Участников', 'до 3', 'без ограничений', 'без ограничений'], ['Чат и диск', false, true, true],
+        ['Обзор и отчёты по времени', false, true, true], ['AI-помощник', false, true, true],
+        ['Помощь с запуском', false, false, true], ['Приоритетная поддержка', false, false, true],
+      ];
+      const cell = (v) => (v === true ? h('td', { class: 'yes', 'aria-label': 'есть' }, '✓') : v === false ? h('td', { class: 'no', 'aria-label': 'нет' }, '—') : h('td', null, v));
+      body = [
+        h('h1', null, 'Тарифы под любой бюджет'),
+        h('p', { class: 'pg-lead' }, 'Начни бесплатно и переходи дальше, когда команда вырастет.'),
+        h('div', { class: 'pr-cards pg-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i}` }, pl.badge ? h('span', { class: 'pr-badge' }, pl.badge) : null, h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text), h('a', { class: 'btn small pr-go', href: i === 2 ? '/contacts' : '/register' }, i === 2 ? 'Связаться' : 'Начать')))),
+        h('h2', { class: 'pg-h2' }, 'Сравнение планов'),
+        h('div', { class: 'cmp-wrap' }, h('table', { class: 'cmp' },
+          h('thead', null, h('tr', null, h('th', null, ''), ...PLANS.map((pl) => h('th', null, pl.name)))),
+          h('tbody', null, rows.map(([t, ...v]) => h('tr', null, h('th', { scope: 'row' }, t), ...v.map(cell)))))),
+        h('p', { class: 'pg-note' }, 'Тарифы пока ориентировочные: условия могут измениться до запуска оплаты.'),
+      ];
+    } else if (kind === 'contacts') {
+      body = [
+        h('h1', null, 'Контакты'),
+        h('p', { class: 'pg-lead' }, 'tasqly делает один человек из Казахстана.'),
+        h('div', { class: 'pg-card' }, h('b', null, 'Автор и поддержка'), h('p', null, 'Создано @bauyrzhanov_12_. Пиши с вопросами по сервису, идеями и багами. Для компаний, которым нужны свои условия, тариф «Бизнес» обсуждается лично.')),
+        h('div', { class: 'pg-card' }, h('b', null, 'Уже есть аккаунт?'), h('p', null, 'Часть вопросов решается внутри кабинета: код приглашения, участники, пароль.'), h('a', { class: 'btn small', href: state.user ? PANEL : '/login' }, state.user ? 'В кабинет' : 'Войти')),
+      ];
+    } else {
+      body = [
+        h('h1', null, titles[kind]),
+        h('div', { class: 'pg-card' }, h('b', null, 'Документ в подготовке'), h('p', null, 'Полный текст появится до запуска платных тарифов. Пока в сервисе хранятся только данные, которые ты вводишь сам: имя, email, хэш пароля и содержимое твоих пространств.'), h('a', { class: 'btn small ghost', href: '/contacts' }, 'Вопросы по данным')),
+      ];
+    }
+    render(nav, h('main', { class: 'pg' }, ...body), foot);
+  }
+
   function viewAuth(initialMode = 'login') {
     document.title = initialMode === 'register' ? 'Регистрация · tasqly' : 'Вход · tasqly';
     destroyDock();
     let mode = initialMode;
+    const external = !IN_PANEL;
+    const setUrl = (m) => (external ? history.replaceState(null, '', m === 'login' ? '/login' : '/register') : history.replaceState(null, '', m === 'login' ? '#/login' : '#/register'));
     const error = h('div', { class: 'error' });
     const form = h('form', { novalidate: true });
     const tabs = h('div', { class: 'seg' });
 
     function paint() {
       tabs.replaceChildren(
-        h('button', { type: 'button', class: mode === 'login' ? 'active' : '', onclick: () => ((mode = 'login'), history.replaceState(null, '', '#/login'), paint()) }, 'Вход'),
-        h('button', { type: 'button', class: mode === 'register' ? 'active' : '', onclick: () => ((mode = 'register'), history.replaceState(null, '', '#/register'), paint()) }, 'Регистрация'),
+        h('button', { type: 'button', class: mode === 'login' ? 'active' : '', onclick: () => ((mode = 'login'), setUrl('login'), paint()) }, 'Вход'),
+        h('button', { type: 'button', class: mode === 'register' ? 'active' : '', onclick: () => ((mode = 'register'), setUrl('register'), paint()) }, 'Регистрация'),
       );
       form.replaceChildren(
         ...(mode === 'register' ? [h('label', { class: 'field' }, 'Имя'), h('input', { type: 'text', name: 'name', autocomplete: 'name', maxlength: 60 })] : []),
@@ -1112,6 +1191,7 @@
       try {
         const res = await api.post(mode === 'login' ? '/api/auth/login' : '/api/auth/register', data);
         state.user = res.user;
+        if (external) { location.href = PANEL; return; }
         if (location.hash === '#/') route();
         else location.hash = '#/';
       } catch (err) {
@@ -1333,7 +1413,6 @@
       clearTimeout(saveTimer);
       saveTimer = setTimeout(flush, 700);
     };
-    const prevCleanup = cleanup;
     cleanup = () => {
       flush();
       if (prevCleanup) prevCleanup();
@@ -1489,7 +1568,6 @@
     });
     poll();
     const timer = setInterval(() => !document.hidden && poll(), 3000);
-    const prevCleanup = cleanup;
     cleanup = () => {
       clearInterval(timer);
       if (prevCleanup) prevCleanup();
@@ -2840,7 +2918,15 @@
     void app.offsetWidth;
     app.classList.add('page-enter');
     const hash = location.hash || '#/';
-    if (!IN_PANEL) return viewLanding();
+    if (!IN_PANEL) {
+      const path = location.pathname.replace(/\/+$/, '');
+      if (path === '/login' || path === '/register') {
+        if (state.user) return location.replace(PANEL);
+        return viewAuth(path === '/login' ? 'login' : 'register');
+      }
+      if (['/pricing', '/contacts', '/privacy', '/terms'].includes(path)) return viewPublicPage(path.slice(1));
+      return viewLanding();
+    }
     if (!state.user) {
       if (hash === '#/login') return viewAuth('login');
       if (hash === '#/register') return viewAuth('register');
@@ -2861,6 +2947,38 @@
       render(topbar([{ label: 'Ошибка' }]), h('div', { class: 'container' }, h('div', { class: 'card empty' }, e.message, h('div', { class: 'spacer' }), h('a', { class: 'btn', href: '#/' }, 'На главную'))));
     }
   }
+
+  // ---------- инерционная прокрутка на публичных страницах ----------
+  (function smoothScroll() {
+    if (IN_PANEL || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !window.matchMedia('(pointer: fine)').matches) return;
+    const root = document.documentElement;
+    root.style.scrollBehavior = 'auto';
+    let target = window.scrollY, cur = window.scrollY, raf = 0;
+    const limit = () => Math.max(0, root.scrollHeight - window.innerHeight);
+    const frame = () => {
+      cur += (target - cur) * 0.085;
+      if (Math.abs(target - cur) < 0.4) { cur = target; raf = 0; window.scrollTo(0, cur); return; }
+      window.scrollTo(0, cur);
+      raf = requestAnimationFrame(frame);
+    };
+    const scrollable = (el) => {
+      for (; el && el !== document.body; el = el.parentElement) {
+        const o = getComputedStyle(el).overflowY;
+        if ((o === 'auto' || o === 'scroll') && el.scrollHeight > el.clientHeight + 1) return true;
+      }
+      return false;
+    };
+    window.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.defaultPrevented || Math.abs(e.deltaX) > Math.abs(e.deltaY) || scrollable(e.target)) return;
+      e.preventDefault();
+      const unit = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? window.innerHeight : 1;
+      if (!raf) { cur = window.scrollY; target = cur; }
+      target = Math.min(limit(), Math.max(0, target + e.deltaY * unit));
+      if (!raf) raf = requestAnimationFrame(frame);
+    }, { passive: false });
+    // клавиши, якоря и перетаскивание ползунка двигают страницу сами: подхватываем позицию
+    window.addEventListener('scroll', () => { if (!raf) { cur = window.scrollY; target = cur; } }, { passive: true });
+  })();
 
   window.addEventListener('hashchange', route);
 

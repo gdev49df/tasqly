@@ -1392,3 +1392,46 @@ html, body { overflow-x: clip; max-width: 100%; }
 .rc-board div { gap: 7px; min-width: 0; }
 .rc-board em { padding: 0 2px 2px; }
 .rc-board span { display: flex; align-items: center; min-height: 34px; padding: 6px 9px; font-size: 11.5px; line-height: 1.25; letter-spacing: -0.01em; border-radius: 8px; overflow-wrap: normal; }
+
+/* v6: отдельные публичные страницы */
+.pg { max-width: 1040px; margin: 0 auto; padding: 56px 24px 96px; min-height: 60vh; }
+.pg h1 { font-size: clamp(32px, 5vw, 48px); letter-spacing: -0.04em; line-height: 1.08; margin: 0 0 12px; font-weight: 700; }
+.pg-lead { color: var(--muted); font-size: 18px; margin: 0 0 36px; max-width: 52ch; }
+.pg-h2 { font-size: 24px; letter-spacing: -0.03em; margin: 56px 0 18px; }
+.pg-cards { margin-bottom: 8px; }
+.pg-cards .pr-card { min-height: 220px; }
+.pg-cards .pr-go { margin-top: auto; align-self: flex-start; }
+.pg-note { color: var(--faint); font-size: 13px; margin: 14px 2px 0; }
+.pg-card { border: 1px solid var(--border); background: var(--bg-subtle); border-radius: 14px; padding: 22px 24px; margin: 0 0 14px; max-width: 640px; display: grid; gap: 8px; justify-items: start; }
+.pg-card b { font-size: 17px; letter-spacing: -0.02em; }
+.pg-card p { margin: 0; color: var(--muted); line-height: 1.6; }
+.cmp-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; }
+.cmp { width: 100%; border-collapse: collapse; font-size: 15px; min-width: 560px; }
+.cmp th, .cmp td { padding: 14px 18px; text-align: center; border-bottom: 1px solid var(--border); }
+.cmp thead th { font-weight: 650; background: var(--bg-subtle); }
+.cmp tbody th { text-align: left; font-weight: 500; }
+.cmp tbody tr:last-child > * { border-bottom: 0; }
+.cmp td.yes { color: var(--text); font-weight: 700; }
+.cmp td.no { color: var(--faint); }
+.cmp td:nth-child(3), .cmp thead th:nth-child(3) { background: color-mix(in srgb, var(--lime) 12%, transparent); }
+@media (max-width: 720px) { .pg { padding: 36px 18px 72px; } }
+
+/* v6.1: плавное переключение вкладок и свой скролл-бар */
+.ft-list { position: relative; }
+.ft-list button::before { display: none; }
+.ft-ind { position: absolute; left: 0; top: 0; width: 4px; height: 0; background: var(--lime); border-radius: 0 3px 3px 0; will-change: transform, height; pointer-events: none; z-index: 1; }
+.ft-list button { transition: background .45s var(--ease-out), color .3s; }
+.ft-list button span { transition: max-height .55s cubic-bezier(.2, .9, .25, 1), opacity .4s, margin .4s; }
+.ft-holder { display: flex; flex-direction: column; min-width: 0; }
+.ft-holder .ft-view { flex: 1; animation: ft-swap .65s cubic-bezier(.2, .9, .25, 1.06) both; }
+@keyframes ft-swap { from { opacity: 0; transform: translateY(calc(var(--dir, 1) * 26px)) scale(.985); } 60% { opacity: 1; } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ft-holder .ft-view { animation: none; } .ft-ind { transition: none; } }
+
+html { scrollbar-gutter: auto; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text) 24%, transparent); border-radius: 99px; border: 3px solid transparent; background-clip: padding-box; transition: background .2s; }
+::-webkit-scrollbar-thumb:hover { background: var(--lime); background-clip: padding-box; border: 3px solid transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-corner { background: transparent; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 30%, transparent) transparent; } }
