@@ -1118,3 +1118,16 @@ a.btn:hover { text-decoration: none; }
 .cap-send { background: var(--accent); color: var(--accent-ink); }
 .cap-send:hover { filter: brightness(1.08); }
 .cap-send:active, .cap-btn:active { transform: scale(.9); }
+
+/* ---------- подвал главной ---------- */
+.land-foot { margin-top: 72px; border-top: 1px solid var(--border); background: var(--bg-subtle); }
+.lf-in { max-width: 1120px; margin: 0 auto; padding: 44px 20px 28px; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr); gap: 36px; }
+.lf-brand .logo { font-size: 18px; }
+.lf-brand .logo span { display: inline; }
+.lf-brand p { margin: 14px 0 0; max-width: 340px; color: var(--muted); line-height: 1.6; font-size: 14px; }
+.lf-col { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; font-size: 14px; }
+.lf-col b { font-size: 13px; color: var(--faint); font-weight: 600; margin-bottom: 2px; }
+.lf-col a, .lf-col button { border: 0; background: transparent; padding: 0; font: inherit; color: var(--text); cursor: pointer; text-align: left; }
+.lf-col a:hover, .lf-col button:hover { color: var(--accent); text-decoration: none; }
+.lf-bottom { max-width: 1120px; margin: 0 auto; padding: 16px 20px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; color: var(--faint); font-size: 13px; }
+@media (max-width: 720px) { .lf-in { grid-template-columns: 1fr 1fr; } .lf-brand { grid-column: 1 / -1; } }

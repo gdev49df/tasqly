@@ -993,6 +993,21 @@
       h('div', { class: 'pr-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i} reveal`, style: `transition-delay:${i * 90}ms` }, h('span', { class: 'pr-ic', 'aria-hidden': 'true' }, pl.icon), h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text)))),
     ));
 
+    const col = (title, links) => h('div', { class: 'lf-col' }, h('b', null, title), ...links);
+    const lf = (label, id) => h('button', { type: 'button', onclick: to(id) }, label);
+    const landFooter = h(
+      'footer',
+      { class: 'land-foot' },
+      h(
+        'div',
+        { class: 'lf-in' },
+        h('div', { class: 'lf-brand' }, logoEl({ class: 'logo' }), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве. С AI-помощником, который знает ваши проекты.')),
+        col('Продукт', [lf('Возможности', 'features'), lf('Проекты', 'kinds'), lf('Как начать', 'steps'), lf('Тарифы', 'pricing')]),
+        col('Аккаунт', state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: PANEL + '#/login' }, 'Войти'), h('a', { href: PANEL + '#/register' }, 'Создать пространство')]),
+      ),
+      h('div', { class: 'lf-bottom' }, h('span', null, `© ${new Date().getFullYear()} tasqly`), h('span', null, 'Сделано в Казахстане')),
+    );
+
     // «как начать»: три шага с мини-иллюстрациями
     let kindIdx = 1;
     const kindCols = [['К выполнению', 'В работе', 'Готово'], ['Бэклог', 'К выполнению', 'В работе', 'На проверке', 'Готово'], ['Бэклог', 'Спринт', 'В работе', 'Code review', 'Тестирование', 'Готово']];
@@ -1051,6 +1066,7 @@
         ),
         stepsSection,
         pricing,
+        landFooter,
       ),
     );
   }
