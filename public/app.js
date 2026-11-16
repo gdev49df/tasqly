@@ -195,6 +195,8 @@
   const THEME_TEXT = { auto: 'Тема: как в системе', light: 'Тема: светлая', dark: 'Тема: тёмная' };
 
   const ICONS = {
+    plus: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg>',
+    clock: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><path d="M10 6v4.2l2.8 1.7"/></svg>',
     menu: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>',
     spark: '<svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M10 1.8 11.9 7l5.3 1.9-5.3 1.9L10 16.2 8.1 10.8 2.8 8.9 8.1 7zM16 13.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>',
     mail: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="4.5" width="15" height="11" rx="2.5"/><path d="m3.5 6 6.5 5 6.5-5" stroke-linecap="round"/></svg>',
@@ -579,6 +581,175 @@
     return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), mark, h('span', null, 'tasq', h('b', null, 'ly')));
   }
 
+  // ---------- быстрое создание и учёт времени из верхней панели ----------
+  const wsCache = {};
+  async function loadWorkspaceFull(id) {
+    if (!wsCache[id] || Date.now() - wsCache[id].at > 15000) wsCache[id] = { at: Date.now(), data: await api.get(`/api/workspaces/${id}`) };
+    return wsCache[id].data;
+  }
+  async function pickWorkspaces() {
+    const list = (await api.get('/api/workspaces')).workspaces;
+    if (!list.length) throw new Error('сначала создай пространство');
+    const pre = aiCtx.workspaceId || lastWsStore.get();
+    const ordered = [...list].sort((a, b) => (a.id === pre ? -1 : b.id === pre ? 1 : 0));
+    return ordered;
+  }
+  function selectEl(options, value) {
+    const sel = h('select', null, options.map(([v, label]) => h('option', { value: v }, label)));
+    if (value !== undefined) sel.value = value;
+    return sel;
+  }
+  function openSheet(title, fields, submitLabel, onSubmit, extra) {
+    const overlay = h('div', { class: 'overlay' });
+    const close = () => closeOverlay(overlay);
+    overlay.addEventListener('tq-close', close);
+    overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+    const error = h('div', { class: 'error' });
+    const submit = h('button', { class: 'btn', type: 'submit' }, submitLabel);
+    const form = h('form', { novalidate: true, class: 'modal narrow', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+      h('div', { class: 'head' }, h('h1', { style: 'font-size:18px;flex:1;margin:0' }, title), h('button', { type: 'button', class: 'icon-btn', onclick: close, 'aria-label': 'Закрыть' }, '✕')),
+      ...fields, extra || null, error,
+      h('div', { class: 'modal-actions' }, h('button', { type: 'button', class: 'btn ghost', onclick: close }, 'Отмена'), submitLabel ? submit : null));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      submit.disabled = true;
+      try {
+        await onSubmit(close);
+      } catch (err) {
+        error.textContent = err.message;
+        submit.disabled = false;
+      }
+    });
+    overlay.append(form);
+    document.body.append(overlay);
+    const first = form.querySelector('input, textarea, select');
+    if (first) first.focus();
+    return { overlay, close, form };
+  }
+  const field = (label, control) => [h('label', { class: 'field' }, label), control];
+
+  async function openQuickCreate(kind) {
+    let wsList;
+    try {
+      wsList = await pickWorkspaces();
+    } catch (e) {
+      return toast(e.message);
+    }
+    const titles = { task: 'Новая задача', meeting: 'Новая встреча', note: 'Новая заметка', doc: 'Новый документ' };
+    const wsSel = selectEl(wsList.map((w) => [w.id, w.name]));
+    const projSel = selectEl([]);
+    const title = h('input', { type: 'text', maxlength: 200, placeholder: kind === 'meeting' ? 'О чём встреча' : kind === 'task' ? 'Что нужно сделать' : 'Заголовок' });
+    const date = h('input', { type: 'date' });
+    const time = h('input', { type: 'time', value: '10:00' });
+    const text = h('textarea', { rows: 5, placeholder: kind === 'doc' ? 'Текст документа' : 'Текст заметки', maxlength: 20000 });
+    let detail = null;
+    const loadProjects = async () => {
+      detail = await loadWorkspaceFull(wsSel.value);
+      projSel.replaceChildren(...detail.projects.map((p) => h('option', { value: p.id }, p.name)));
+    };
+    const needsProject = kind === 'task' || kind === 'meeting';
+    const fields = [
+      ...(wsList.length > 1 ? field('Пространство', wsSel) : []),
+      ...(needsProject ? field('Проект', projSel) : []),
+      ...field(kind === 'doc' || kind === 'note' ? 'Заголовок' : 'Название', title),
+      ...(kind === 'task' ? field('Срок (необязательно)', date) : []),
+      ...(kind === 'meeting' ? [...field('Дата', date), ...field('Время', time)] : []),
+      ...(kind === 'note' || kind === 'doc' ? field('Текст', text) : []),
+    ];
+    wsSel.addEventListener('change', () => needsProject && loadProjects().catch((e) => toast(e.message)));
+    const sheet = openSheet(titles[kind], fields, 'Создать', async (close) => {
+      const name = title.value.trim();
+      if (!name) throw new Error('введи название');
+      if (kind === 'note' || kind === 'doc') {
+        await api.post(`/api/workspaces/${wsSel.value}/notes`, { title: name, body: text.value });
+        toast(kind === 'doc' ? 'Документ создан' : 'Заметка создана');
+        close();
+        if (kind === 'doc' || kind === 'note') location.hash = `#/w/${wsSel.value}/notes`;
+        return;
+      }
+      if (!projSel.value) throw new Error('в пространстве нет проектов: создай проект');
+      if (kind === 'meeting' && !date.value) throw new Error('выбери дату встречи');
+      const body = { title: name };
+      if (date.value) body.due_date = date.value;
+      if (kind === 'meeting') body.description = `Встреча, ${time.value || 'время не указано'}`;
+      const { task } = await api.post(`/api/projects/${projSel.value}/tasks`, body);
+      if (kind === 'meeting') {
+        try {
+          let label = (detail?.labels || []).find((l) => l.name.toLowerCase() === 'встреча');
+          if (!label) label = (await api.post(`/api/workspaces/${wsSel.value}/labels`, { name: 'встреча', color: '#3e63dd' })).label;
+          await api.put(`/api/tasks/${task.id}/labels`, { label_ids: [label.id] });
+          delete wsCache[wsSel.value];
+        } catch {
+          /* метка не критична */
+        }
+      }
+      toast(kind === 'meeting' ? 'Встреча создана' : 'Задача создана');
+      close();
+      location.hash = `#/p/${projSel.value}`;
+      route();
+    });
+    if (needsProject) {
+      loadProjects().then(() => {
+        if (!detail.projects.length) sheet.form.querySelector('.error').textContent = 'в пространстве пока нет проектов: создай проект на странице пространства';
+      }).catch((e) => toast(e.message));
+    }
+  }
+
+  function openQuickMenu(anchor) {
+    openMenu(anchor, [
+      { label: 'Быстрое создание', disabled: true, onClick() {} },
+      '-',
+      { label: 'Задача', onClick: () => openQuickCreate('task') },
+      { label: 'Встреча', onClick: () => openQuickCreate('meeting') },
+      { label: 'Заметка', onClick: () => openQuickCreate('note') },
+      { label: 'Документ', onClick: () => openQuickCreate('doc') },
+    ]);
+    if (menuEl) menuEl.classList.add('right');
+  }
+
+  async function openTrackTime() {
+    let wsList;
+    try {
+      wsList = await pickWorkspaces();
+    } catch (e) {
+      return toast(e.message);
+    }
+    const wsSel = selectEl(wsList.map((w) => [w.id, w.name]));
+    const projSel = selectEl([]);
+    const taskSel = selectEl([]);
+    let projects = [];
+    const loadTasks = async () => {
+      if (!projSel.value) return taskSel.replaceChildren(h('option', { value: '' }, 'нет задач'));
+      const r = await api.get(`/api/projects/${projSel.value}`);
+      const done = new Set(r.columns.filter((c) => c.is_done).map((c) => c.id));
+      const open = r.tasks.filter((t) => !done.has(t.column_id));
+      taskSel.replaceChildren(...(open.length ? open.map((t) => h('option', { value: t.id }, t.title)) : [h('option', { value: '' }, 'нет открытых задач')]));
+    };
+    const loadProjects = async () => {
+      projects = (await loadWorkspaceFull(wsSel.value)).projects;
+      projSel.replaceChildren(...(projects.length ? projects.map((p) => h('option', { value: p.id }, p.name)) : [h('option', { value: '' }, 'нет проектов')]));
+      await loadTasks();
+    };
+    wsSel.addEventListener('change', () => loadProjects().catch((e) => toast(e.message)));
+    projSel.addEventListener('change', () => loadTasks().catch((e) => toast(e.message)));
+    const running = state.timer
+      ? h('div', { class: 'track-now' }, h('span', { class: 'rec' }), h('div', null, h('b', null, state.timer.task_title), h('span', null, 'идёт ')), h('b', { class: 'timer-live' }, fmtClock(elapsedSec())), h('button', { type: 'button', class: 'btn ghost small', onclick: async () => { await stopTimer(); sheet.close(); } }, 'Остановить'))
+      : null;
+    const sheet = openSheet('Отследить время', [running, ...(wsList.length > 1 ? field('Пространство', wsSel) : []), ...field('Проект', projSel), ...field('Задача', taskSel)].filter(Boolean), state.timer ? 'Переключить' : 'Начать', async (close) => {
+      if (!taskSel.value) throw new Error('выбери задачу');
+      const r = await api.post(`/api/tasks/${taskSel.value}/timer/start`, {});
+      state.timer = r.entry;
+      state.timerLoaded = true;
+      timerOffset = r.server_time - Date.now();
+      paintTimer();
+      window.dispatchEvent(new Event('tq-timer'));
+      toast('Таймер запущен');
+      close();
+    });
+    loadProjects().catch((e) => toast(e.message));
+  }
+
   function topbar(crumbs) {
     const mail = state.user ? h('button', { class: 'icon-btn mail-btn', title: 'Входящие', 'aria-label': 'Входящие', onclick: (e) => openInbox(e.currentTarget) }, icon('mail')) : null;
     if (mail) loadBadge(mail);
@@ -586,6 +757,8 @@
       if (state.timerLoaded) queueMicrotask(paintTimer);
       else refreshTimer();
     }
+    const quickBtn = state.user ? h('button', { class: 'icon-btn quick-btn', title: 'Быстрое создание', 'aria-label': 'Быстрое создание', 'aria-haspopup': 'menu', onclick: (e) => openQuickMenu(e.currentTarget) }, icon('plus')) : null;
+    const trackBtn = state.user ? h('button', { class: 'track-btn', title: 'Отследить время', 'aria-label': 'Отследить время', onclick: openTrackTime }, icon('clock'), h('span', null, 'Отследить время')) : null;
     const aiBtn = state.user
       ? h('button', { class: 'ai-btn', title: 'AI tasqly', 'aria-label': 'Открыть AI', 'aria-pressed': String(document.body.classList.contains('ai-open')), onclick: () => toggleDock() }, icon('spark'), h('span', null, 'AI'))
       : null;
@@ -599,6 +772,8 @@
       logoEl(),
       h('nav', { class: 'crumbs' }, crumbs.map((c) => [h('span', null, '/'), c.href ? h('a', { href: c.href }, c.label) : h('span', { class: 'current' }, c.label)])),
       h('div', { class: 'timer-slot' }),
+      quickBtn,
+      trackBtn,
       aiBtn,
       mail,
       profile,
@@ -767,8 +942,8 @@
         h('div', { class: 'rc-vis rc-team' }, h('div', { class: 'rt-msg' }, h('span', { class: 'avatar', style: 'background:#3e63dd' }, 'А'), 'Макеты готовы, смотрите'), h('div', { class: 'rt-msg me' }, 'Принято, беру вёрстку'), h('div', { class: 'rt-file' }, h('i', null, 'PDF'), 'бриф-клиента.pdf', h('em', null, '184 КБ')))],
     ];
     const track = h('div', { class: 'rc-track' }, h('article', { class: 'rc rc-intro' }, h('span', { class: 'rc-brand' }, svgEl('<svg viewBox="0 0 512 512" width="30" height="30"><rect width="512" height="512" rx="112" fill="#fff" fill-opacity=".22"/><g fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g></svg>', 'rc-mark')), h('h2', null, 'Одно решение для всех ролей'), h('div', { class: 'rc-avatars' }, ...['#3e63dd', '#8e4ec6', '#30a46c', '#e5484d'].map((c, i) => h('span', { class: 'avatar', style: `background:${c}` }, 'АДМС'[i])))), ...roleCards.map(([title, tags, vis]) => h('article', { class: 'rc' }, h('h3', null, title), h('div', { class: 'rc-tags' }, tags.map((t) => h('span', null, t))), vis)));
-    const slide = (dir) => track.scrollBy({ left: dir * Math.min(360, track.clientWidth * 0.8), behavior: calmMotion ? 'auto' : 'smooth' });
-    const rolesBox = h('div', { class: 'rc-wrap' }, track, h('button', { class: 'rc-arrow prev', 'aria-label': 'Назад', onclick: () => { stopAuto(); slide(-1); } }, '‹'), h('button', { class: 'rc-arrow next', 'aria-label': 'Вперёд', onclick: () => { stopAuto(); slide(1); } }, '›'));
+    const slide = (dir) => track.scrollBy({ left: dir * Math.min(420, track.clientWidth * 0.7), behavior: calmMotion ? 'auto' : 'smooth' });
+    const rolesBox = h('div', { class: 'rc-wrap' }, track);
     // автоход: вправо до конца, потом обратно; пауза при наведении и касании
     let autoDir = 1, autoId = null, autoOn = true;
     function stopAuto() { autoOn = false; }
@@ -779,6 +954,30 @@
       else if (autoDir < 0 && track.scrollLeft <= 4) autoDir = 1;
       slide(autoDir);
     }, 2800) : null;
+
+    // прокрутка зажатием мыши (на телефоне работает обычный свайп)
+    let drag = null;
+    track.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      drag = { x: e.clientX, left: track.scrollLeft, moved: false };
+      autoOn = false;
+    });
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', onDragEnd);
+    function onDragMove(e) {
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(dx) > 4) {
+        drag.moved = true;
+        track.classList.add('dragging');
+      }
+      if (drag.moved) track.scrollLeft = drag.left - dx;
+    }
+    function onDragEnd() {
+      if (!drag) return;
+      drag = null;
+      track.classList.remove('dragging');
+    }
     rolesBox.addEventListener('pointerenter', () => { autoOn = false; });
     rolesBox.addEventListener('pointerleave', () => { autoOn = true; });
     rolesBox.addEventListener('touchstart', () => { autoOn = false; }, { passive: true });
@@ -820,7 +1019,7 @@
       io = new IntersectionObserver((entries) => entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { threshold: 0.25 });
       setTimeout(() => document.querySelectorAll('.land .reveal').forEach((el) => io.observe(el)), 0);
     } else setTimeout(() => document.querySelectorAll('.land .reveal').forEach((el) => el.classList.add('in')), 0);
-    cleanup = () => { clearInterval(timerId); if (autoId) clearInterval(autoId); if (io) io.disconnect(); };
+    cleanup = () => { window.removeEventListener('pointermove', onDragMove); window.removeEventListener('pointerup', onDragEnd); clearInterval(timerId); if (autoId) clearInterval(autoId); if (io) io.disconnect(); };
 
     render(
       h(
@@ -1291,8 +1490,26 @@
       list.scrollTop = list.scrollHeight;
       return el;
     };
-    const hello = () =>
-      list.replaceChildren(h('div', { class: 'ai-hello' }, h('b', null, 'AI tasqly'), h('span', null, 'Спроси про проекты и задачи: итоги, что горит, план на день. Могу превратить текст в задачи и разбить задачу на подзадачи в её окне.')));
+    const actions = [
+      ['Итоги', 'Что сделано, что в работе и что отстаёт', 'Сделай краткие итоги: что сделано, что в работе, что отстаёт.', '#3e63dd'],
+      ['Что горит', 'Просроченные задачи и ближайшие сроки', 'Какие задачи просрочены или горят в ближайшие дни? Перечисли с исполнителями.', '#e5484d'],
+      ['План на сегодня', 'Приоритеты и сроки на день', 'Составь для меня план на сегодня по приоритетам и срокам.', '#30a46c'],
+      ['Нагрузка команды', 'Кто перегружен, а кто свободен', 'Как распределена нагрузка между участниками? Есть ли перекосы?', '#8e4ec6'],
+    ];
+    const hello = () => {
+      chatEl && chatEl.classList.remove('talking');
+      list.replaceChildren(
+        h(
+          'div',
+          { class: 'ai-hello' },
+          h('span', { class: 'hi-kicker' }, 'Здравствуйте, я AI tasqly'),
+          h('h2', { class: 'hi-title' }, 'Чем я могу ', h('em', null, 'помочь'), '?'),
+          h('p', { class: 'hi-sub' }, 'Выберите действие ниже или задайте любой вопрос о задачах и проектах'),
+          h('div', { class: 'hi-cards' }, actions.map(([t, d, q, c]) => h('button', { class: 'hi-card', style: `--c:${c}`, onclick: () => ask(q) }, h('b', null, t), h('span', null, d)))),
+        ),
+      );
+    };
+    let chatEl = null;
     hello();
 
     let busy = false;
@@ -1302,6 +1519,7 @@
       if (!ctx.workspaceId) return toast('Сначала открой или создай пространство');
       busy = true;
       if (list.querySelector('.ai-hello')) list.replaceChildren();
+      chatEl && chatEl.classList.add('talking');
       bubble('user', text);
       const wait = bubble('assistant', 'Думаю…');
       wait.classList.add('pending');
@@ -1327,7 +1545,7 @@
       ['План на сегодня', 'Составь для меня план на сегодня по приоритетам и срокам.'],
       ['Нагрузка', 'Как распределена нагрузка между участниками? Есть ли перекосы?'],
     ];
-    const input = h('textarea', { rows: 1, placeholder: 'Спроси про задачи (Enter отправляет)', maxlength: 1500, 'aria-label': 'Запрос к AI' });
+    const input = h('textarea', { rows: 1, placeholder: 'Спросите или найдите что угодно', maxlength: 1500, 'aria-label': 'Запрос к AI' });
     const send = () => {
       const v = input.value;
       input.value = '';
@@ -1339,7 +1557,11 @@
         send();
       }
     });
-    const el = h('div', { class: `chat${compact ? ' compact' : ''}` }, list, h('div', { class: 'chips' }, chips.map(([label, q]) => h('button', { class: 'chip-btn', onclick: () => ask(q) }, label))), h('div', { class: 'chat-input' }, input, h('button', { class: 'btn', onclick: send }, 'Спросить')));
+    const newBtn = h('button', { class: 'cap-btn', type: 'button', title: 'Новый разговор', 'aria-label': 'Новый разговор', onclick: () => { history.length = 0; note.textContent = ''; hello(); } }, icon('plus'));
+    const sendBtn = h('button', { class: 'cap-send', type: 'button', title: 'Отправить', 'aria-label': 'Отправить', onclick: send });
+    sendBtn.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16V4M5 9l5-5 5 5"/></svg>';
+    const el = h('div', { class: `chat${compact ? ' compact' : ''}` }, list, h('div', { class: 'chips' }, chips.map(([label, q]) => h('button', { class: 'chip-btn', onclick: () => ask(q) }, label))), h('div', { class: 'chat-input' }, h('div', { class: 'capsule' }, newBtn, input, sendBtn)));
+    chatEl = el;
     return {
       el,
       note,
