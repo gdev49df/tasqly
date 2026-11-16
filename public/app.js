@@ -970,7 +970,7 @@
     ].map(([tag, title, text, mock], i) => h('div', { class: `sc-row${i % 2 ? ' flip' : ''}`, id: i === 0 ? 'sc-time' : null }, h('div', { class: 'sc-copy reveal' }, h('span', { class: 'sc-tag' }, tag), h('h3', null, title), h('p', null, text)), mock));
 
     const aiPrompts = ['Что горит на этой неделе?', 'Собери план на сегодня', 'Кто перегружен?', 'Разбей задачу на шаги', 'Текст встречи в задачи'];
-    const aiSection = h('section', { class: 'land-sec wide', id: 'ai' }, h('div', { class: 'ai-sec' },
+    const aiSection = h('section', { class: 'land-sec', id: 'ai' }, h('div', { class: 'ai-sec' },
       h('div', { class: 'ai-sec-copy reveal' },
         h('span', { class: 'sc-tag' }, 'AI tasqly'),
         h('h2', null, 'Помощник, который знает твои задачи'),
@@ -999,7 +999,7 @@
       ['Небольшим командам', ['Общий чат', 'Диск с файлами', 'Приглашение по коду', 'Роли доступа'],
         h('div', { class: 'rc-vis rc-team' }, h('div', { class: 'rt-msg' }, h('span', { class: 'avatar', style: 'background:#3e63dd' }, 'А'), 'Макеты готовы, смотрите'), h('div', { class: 'rt-msg me' }, 'Принято, беру вёрстку'), h('div', { class: 'rt-file' }, h('i', null, 'PDF'), 'бриф-клиента.pdf', h('em', null, '184 КБ')))],
     ];
-    const track = h('div', { class: 'rc-track' }, h('article', { class: 'rc rc-intro' }, h('span', { class: 'rc-brand' }, svgEl('<svg viewBox="0 0 512 512" width="30" height="30"><rect width="512" height="512" rx="112" fill="#111"/><g fill="none" stroke="#c6f432" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g></svg>', 'rc-mark')), h('h2', null, 'Одно решение для всех ролей'), h('div', { class: 'rc-avatars' }, ...['#3e63dd', '#8e4ec6', '#30a46c', '#e5484d'].map((c, i) => h('span', { class: 'avatar', style: `background:${c}` }, 'АДМС'[i])))), ...roleCards.map(([title, tags, vis]) => h('article', { class: 'rc' }, h('h3', null, title), h('div', { class: 'rc-tags' }, tags.map((t) => h('span', null, t))), vis)));
+    const track = h('div', { class: 'rc-track' }, h('article', { class: 'rc rc-intro' }, h('span', { class: 'rc-brand' }, 'tasqly'), h('h2', null, 'Одно решение для всех ролей'), h('div', { class: 'rc-avatars' }, ...['#3e63dd', '#8e4ec6', '#30a46c', '#e5484d'].map((c, i) => h('span', { class: 'avatar', style: `background:${c}` }, 'АДМС'[i])))), ...roleCards.map(([title, tags, vis]) => h('article', { class: 'rc' }, h('h3', null, title), h('div', { class: 'rc-tags' }, tags.map((t) => h('span', null, t))), vis)));
     const slide = (dir) => track.scrollBy({ left: dir * Math.min(420, track.clientWidth * 0.7), behavior: calmMotion ? 'auto' : 'smooth' });
     const rolesBox = h('div', { class: 'rc-wrap' }, track);
     // автоход: вправо до конца, потом обратно; пауза при наведении и касании

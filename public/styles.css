@@ -1545,3 +1545,4 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .ai-facts li { padding-left: 24px; position: relative; }
 .ai-facts li::before { content: '✓'; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--lime); color: var(--lime-ink); font-size: 10px; display: grid; place-items: center; top: 2px; }
 @media (max-width: 860px) { .ai-sec { grid-template-columns: 1fr; padding: 26px 20px; gap: 28px; } }
+.rc-brand { width: auto; height: auto; background: none; box-shadow: none; padding: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.045em; color: var(--lime-ink); line-height: 1; }
