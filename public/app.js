@@ -2923,7 +2923,7 @@
     const toolbarEl = h('div', { class: 'toolbar' }, search, assigneeFilter, labelFilter, prioFilter, lateToggle, resetBtn);
     render(
       topbar([{ label: 'Пространства', href: '#/' }, { label: S.project.workspace_name || 'Пространство', href: `#/w/${S.project.workspace_id}` }, { label: S.project.name }]),
-      h('div', { class: 'project-head' }, titleEl, more, h('span', { class: 'grow' }), viewTabs),
+      h('div', { class: 'project-head' }, titleEl, more, h('span', { class: 'grow' }), viewTabs, S.project.role === 'owner' ? h('button', { class: 'btn danger small del-project', onclick: deleteProject }, 'Удалить проект') : null),
       toolbarEl,
       content,
     );
