@@ -867,18 +867,21 @@
       ['IT', 'Для разработки: спринты, ревью, баги и фичи', ['Бэклог', 'Спринт', 'В работе', 'Code review', 'Тестирование', 'Готово']],
     ];
 
-    const tabsData = [
-      ['Планирование', 'Ставь задачи, назначай исполнителей и сроки, раскладывай по колонкам и меткам. Перетаскивай карточки на доске и даты в календаре.'],
-      ['Время', 'Включай таймер прямо в задаче или вноси время вручную. Отчёт по людям и проектам показывает, куда уходят часы.'],
-      ['Общение', 'Чат пространства, комментарии к задачам и общие заметки. Договорённости остаются рядом с работой.'],
-      ['AI', 'Помощник знает твои задачи: подскажет, что горит, соберёт план на день и превратит текст встречи в список задач.'],
-    ];
     let tabIdx = 0;
+    const tabsData = [
+      ['Планирование', 'Ставь задачи, назначай исполнителей и сроки, раскладывай по колонкам и меткам. Карточки и даты перетаскиваются мышью.',
+        () => h('div', { class: 'tv-board' }, ...[['Бэклог', ['Согласовать макеты', 'Собрать тексты']], ['В работе', ['Нарисовать главную']], ['Готово', ['Бриф клиента']]].map(([n, cs]) => h('div', null, h('em', null, n), ...cs.map((c, i) => h('span', { class: n === 'Готово' ? 'done' : '' }, c)))))],
+      ['Время', 'Таймер включается в задаче или время вносится вручную. Отчёт по людям и проектам показывает, куда уходят часы.',
+        () => h('div', { class: 'tv-time' }, h('div', { class: 'tv-clock' }, h('span', { class: 'rec' }), h('b', null, '00:42:17')), ...[['Айгерим', 80, '6 ч 40 мин'], ['Данияр', 52, '4 ч 15 мин'], ['Мария', 26, '2 ч 05 мин']].map(([n, w, t]) => h('div', { class: 'tv-row' }, h('span', null, n), h('i', null, h('u', { style: `width:${w}%` })), h('em', null, t))))],
+      ['Общение', 'Чат пространства, комментарии к задачам и общие заметки. Договорённости остаются рядом с работой.',
+        () => h('div', { class: 'tv-chat' }, h('p', null, 'Макеты готовы, смотрите'), h('p', { class: 'me' }, 'Принято, беру вёрстку'), h('p', null, 'Бриф лежит на диске'), h('div', { class: 'tv-file' }, h('i', null, 'PDF'), 'бриф-клиента.pdf', h('em', null, '184 КБ')))],
+      ['AI', 'Помощник знает твои задачи: подскажет, что горит, соберёт план на день и превратит текст встречи в список задач.',
+        () => h('div', { class: 'tv-ai' }, h('p', { class: 'me' }, 'Что горит на этой неделе?'), h('p', null, 'Две задачи требуют внимания: «Подключить оплату» просрочена, «Согласовать макеты» через 5 дней.'), h('div', { class: 'tv-chips' }, h('span', null, 'Назначить Данияра'), h('span', null, 'План на день')))],
+    ];
     const tabsBox = h('div', { class: 'ftabs' });
     const paintTabs = () => tabsBox.replaceChildren(
-      h('div', { class: 'role-tabs', role: 'tablist' }, tabsData.map(([n], i) => h('button', { role: 'tab', class: i === tabIdx ? 'active' : '', 'aria-selected': String(i === tabIdx), onclick: () => { tabIdx = i; paintTabs(); } }, n))),
-      h('p', { class: 'ftab-text' }, tabsData[tabIdx][1]),
-      h('a', { class: 'btn', href: PANEL + '#/register' }, 'Попробовать tasqly'),
+      h('div', { class: 'ft-list', role: 'tablist' }, tabsData.map(([n, d], i) => h('button', { role: 'tab', class: i === tabIdx ? 'active' : '', 'aria-selected': String(i === tabIdx), onclick: () => { tabIdx = i; paintTabs(); } }, h('b', null, n), h('span', null, d)))),
+      h('div', { class: 'ft-view', key: tabIdx }, tabsData[tabIdx][2]()),
     );
     paintTabs();
 
@@ -984,13 +987,13 @@
 
     // ---------- тарифы (названия и цены меняются здесь) ----------
     const PLANS = [
-      { key: 'start', icon: '◎', name: 'Старт', price: '0 ₸', per: 'навсегда', text: 'Для одиночек и небольших дел: проекты, задачи, заметки и таймер.' },
-      { key: 'team', icon: '✦', name: 'Команда', price: '2 500 ₸', per: 'за человека в мес', text: 'Для команд, где важны контроль, учёт времени, чат, диск и AI-помощник.' },
-      { key: 'biz', icon: '▦', name: 'Бизнес', price: 'по запросу', per: '', text: 'Для компаний: свои требования, поддержка и помощь с запуском.' },
+      { name: 'Старт', price: '0 ₸', per: 'навсегда', text: 'Для одиночек и небольших дел.', items: ['Проекты и задачи', 'Заметки', 'Таймер времени', 'До 3 человек'] },
+      { name: 'Команда', price: '2 500 ₸', per: 'за человека в мес', text: 'Для команд, где важен контроль.', badge: 'Популярный', items: ['Всё из «Старт»', 'Чат и диск', 'Обзор и отчёты по времени', 'AI-помощник', 'Без ограничения по людям'] },
+      { name: 'Бизнес', price: 'по запросу', per: '', text: 'Для компаний со своими требованиями.', items: ['Всё из «Команда»', 'Помощь с запуском', 'Приоритетная поддержка', 'Свои условия'] },
     ];
     const pricing = h('section', { class: 'land-sec', id: 'pricing' }, h('div', { class: 'pr' },
       h('div', { class: 'pr-copy reveal' }, h('h2', null, 'Тарифы под любой бюджет'), h('p', null, 'Начни бесплатно и переходи дальше, когда команда вырастет.'), h('div', { class: 'pr-from' }, h('b', null, `от ${PLANS[1].price}`), h('span', null, ' / мес за человека')), h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Подробнее')),
-      h('div', { class: 'pr-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i} reveal`, style: `transition-delay:${i * 90}ms` }, h('span', { class: 'pr-ic', 'aria-hidden': 'true' }, pl.icon), h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text)))),
+      h('div', { class: 'pr-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i} reveal`, style: `transition-delay:${i * 90}ms` }, pl.badge ? h('span', { class: 'pr-badge' }, pl.badge) : null, h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text), h('ul', null, pl.items.map((t) => h('li', null, t)))))),
     ));
 
     const col = (title, links) => h('div', { class: 'lf-col' }, h('b', null, title), ...links);
@@ -1057,7 +1060,7 @@
         h('section', { class: 'land-sec', id: 'showcase' }, h('h2', null, 'Не просто доска: всё для работы рядом'), h('div', { class: 'sc' }, showcase)),
         h('section', { class: 'land-sec wide', id: 'roles' }, rolesBox),
         h('section', { class: 'land-sec', id: 'tabs' }, h('h2', null, 'tasqly подстраивается под твои задачи'), tabsBox),
-        h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('dl', { class: 'feat' }, features.map(([t, d]) => h('div', null, h('dt', null, t), h('dd', null, d))))),
+        h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('div', { class: 'bento' }, features.map(([t, d], i) => h('div', { class: 'bento-cell reveal', style: `transition-delay:${(i % 4) * 70}ms` }, h('span', { class: 'bento-ic', 'aria-hidden': 'true' }, ['▦','▤','◷','◎','✎','✉','▣','✦'][i]), h('b', null, t), h('span', null, d))))),
         h(
           'section',
           { class: 'land-sec', id: 'kinds' },
