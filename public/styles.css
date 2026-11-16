@@ -1345,3 +1345,5 @@ html, body { overflow-x: clip; max-width: 100%; }
   .sc-row.flip .sc-copy { order: 0; }
   .sc-ov { flex-wrap: wrap; }
 }
+.sc-ring svg circle:first-child { stroke: color-mix(in srgb, var(--lime) 22%, var(--border)); }
+.sc-ring .ring-txt b { color: var(--text); }

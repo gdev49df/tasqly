@@ -908,7 +908,7 @@
       'div',
       { class: 'sc-mock reveal', 'aria-hidden': 'true' },
       h('div', { class: 'sc-ov' },
-        svgEl(`<svg viewBox="0 0 120 120" width="132" height="132"><circle cx="60" cy="60" r="${R}" fill="none" stroke="var(--border)" stroke-width="10"/><circle class="ring-fg" cx="60" cy="60" r="${R}" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${CIRC.toFixed(1)}" style="--len:${CIRC.toFixed(1)};--to:${(CIRC * 0.32).toFixed(1)}" transform="rotate(-90 60 60)"/></svg><div class="ring-txt"><b>68%</b><span>готово</span></div>`, 'sc-ring'),
+        svgEl(`<svg viewBox="0 0 120 120" width="132" height="132"><circle cx="60" cy="60" r="${R}" fill="none" stroke="var(--border)" stroke-width="10"/><circle class="ring-fg" cx="60" cy="60" r="${R}" fill="none" stroke="var(--lime)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${CIRC.toFixed(1)}" style="--len:${CIRC.toFixed(1)};--to:${(CIRC * 0.32).toFixed(1)}" transform="rotate(-90 60 60)"/></svg><div class="ring-txt"><b>68%</b><span>готово</span></div>`, 'sc-ring'),
         h('div', { class: 'sc-tiles' },
           ...[['В работе', '7', '#3e63dd'], ['Просрочено', '2', '#e5484d'], ['Завершено', '21', '#30a46c'], ['Без исполнителя', '1', '#a0a0ac']].map(([l, n, c]) => h('div', { class: 'sc-tile', style: `--c:${c}` }, h('b', null, n), h('span', null, l))),
         ),
@@ -934,7 +934,7 @@
     const miniRing = (pct, color, num) => { const r = 24, c = 2 * Math.PI * r; return svgEl(`<svg viewBox="0 0 64 64" width="62" height="62"><circle cx="32" cy="32" r="${r}" fill="none" stroke="var(--border)" stroke-width="6"/><circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - pct / 100)).toFixed(1)}" transform="rotate(-90 32 32)"/></svg><b>${num}</b>`, 'rc-ring'); };
     const roleCards = [
       ['Руководителям', ['Контроль задач', 'Обзор проекта', 'Нагрузка команды', 'AI «что горит»'],
-        h('div', { class: 'rc-vis rc-rings' }, miniRing(68, 'var(--accent)', '68%'), miniRing(25, '#e5484d', '2'), miniRing(90, '#30a46c', '21'), h('span', { class: 'rc-leg' }, 'готово · просрочено · завершено'))],
+        h('div', { class: 'rc-vis rc-rings' }, miniRing(68, 'var(--lime)', '68%'), miniRing(25, '#e5484d', '2'), miniRing(90, '#30a46c', '21'), h('span', { class: 'rc-leg' }, 'готово · просрочено · завершено'))],
       ['Менеджерам проектов', ['Доска, список, календарь', 'Свои колонки', 'Метки и фильтры', 'Оценка времени'],
         h('div', { class: 'rc-vis rc-gantt' }, ...[['Дизайн', 8, 46, '#8e4ec6'], ['Вёрстка', 30, 40, '#3e63dd'], ['Тесты', 58, 34, '#30a46c'], ['Запуск', 78, 18, '#e5484d']].map(([n, l, w, c]) => h('div', { class: 'g-row' }, h('span', null, n), h('i', null, h('u', { style: `left:${l}%;width:${w}%;background:${c}` })))))],
       ['Разработчикам', ['Колонки спринта', 'Баги и фичи', 'Code review', 'Чек-листы'],
