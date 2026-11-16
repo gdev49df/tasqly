@@ -607,7 +607,7 @@
               'button',
               { class: `mail-row${c.created_at > seen ? ' unread' : ''}`, onclick: () => openTo(`#/p/${c.project_id}`) },
               avatar(c.author || '?'),
-              h('div', { class: 'mail-text' }, h('div', { class: 'mail-top' }, h('b', null, c.author || 'Кто-то'), ' в «', c.title, '»'), h('div', { class: 'mail-sub' }, c.body)),
+              h('div', { class: 'mail-text' }, h('div', { class: 'mail-top' }, h('b', null, c.author || 'Кто-то'), c.mentioned ? ' упомянул тебя в «' : ' в «', c.title, '»'), h('div', { class: 'mail-sub' }, c.body)),
               h('span', { class: 'mail-time' }, new Date(c.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })),
             ),
           ),
@@ -2961,12 +2961,62 @@
 
       // комментарии
       const commentsBox = h('div', null, h('div', { class: 'sub' }, 'Загрузка…'));
-      const commentInput = h('textarea', { placeholder: 'Написать комментарий', style: 'min-height:60px', maxlength: 2000 });
+      const commentInput = h('textarea', { placeholder: 'Написать комментарий. @ — упомянуть коллегу', style: 'min-height:60px', maxlength: 2000 });
+      const mentionList = h('div', { class: 'mention-list', hidden: true });
+      const mentionNames = () => S.members.filter((m) => m.id !== state.user.id).map((m) => m.name);
+      const mentionNodes = (text) => {
+        const names = mentionNames().sort((a, b) => b.length - a.length);
+        const out = [];
+        let rest = text;
+        while (rest) {
+          let at = -1;
+          let hit = '';
+          for (let i = rest.indexOf('@'); i !== -1; i = rest.indexOf('@', i + 1)) {
+            const n = names.find((x) => rest.slice(i + 1, i + 1 + x.length).toLowerCase() === x.toLowerCase());
+            if (n) { at = i; hit = rest.slice(i, i + 1 + n.length); break; }
+          }
+          if (at === -1) { out.push(rest); break; }
+          if (at) out.push(rest.slice(0, at));
+          out.push(h('span', { class: 'mention' }, hit));
+          rest = rest.slice(at + hit.length);
+        }
+        return out;
+      };
+      const hideMentions = () => (mentionList.hidden = true);
+      const showMentions = () => {
+        const upto = commentInput.value.slice(0, commentInput.selectionStart);
+        const m = upto.match(/(?:^|\s)@([^\s@]{0,20})$/);
+        if (!m) return hideMentions();
+        const q = m[1].toLowerCase();
+        const found = mentionNames().filter((n) => n.toLowerCase().includes(q)).slice(0, 5);
+        if (!found.length) return hideMentions();
+        mentionList.replaceChildren(
+          ...found.map((n) =>
+            h('button', {
+              type: 'button',
+              class: 'mention-opt',
+              onmousedown: (e) => {
+                e.preventDefault();
+                const pos = commentInput.selectionStart;
+                const start = upto.length - m[1].length - 1;
+                commentInput.value = commentInput.value.slice(0, start) + '@' + n + ' ' + commentInput.value.slice(pos);
+                const caret = start + n.length + 2;
+                commentInput.setSelectionRange(caret, caret);
+                hideMentions();
+                commentInput.focus();
+              },
+            }, avatar(n), n),
+          ),
+        );
+        mentionList.hidden = false;
+      };
+      commentInput.addEventListener('input', showMentions);
+      commentInput.addEventListener('blur', () => setTimeout(hideMentions, 100));
       let comments = [];
       const paintComments = () =>
         commentsBox.replaceChildren(
           ...(comments.length
-            ? comments.map((c) => h('div', { class: 'comment' }, h('div', { class: 'who' }, `${c.author || 'Удалённый пользователь'} · ${formatDateTime(c.created_at)}`), h('div', { class: 'text' }, c.body)))
+            ? comments.map((c) => h('div', { class: 'comment' }, h('div', { class: 'who' }, `${c.author || 'Удалённый пользователь'} · ${formatDateTime(c.created_at)}`), h('div', { class: 'text' }, mentionNodes(c.body))))
             : [h('div', { class: 'sub', style: 'margin-bottom:12px' }, 'Комментариев пока нет')]),
         );
       const sendComment = async () => {
@@ -3023,7 +3073,7 @@
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Метки'), labelBox, h('div', { class: 'new-label' }, newName, swatches, h('button', { class: 'btn ghost small', onclick: createLabel }, 'Добавить'))),
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Подзадачи'), checkBox, h('div', { style: 'margin-top:8px' }, aiBtn), aiBox),
           saved,
-          h('div', { class: 'comments' }, h('h2', null, 'Комментарии'), commentsBox, commentInput, h('div', { class: 'modal-actions' }, h('button', { class: 'btn danger small', onclick: remove }, 'Удалить задачу'), h('button', { class: 'btn small', onclick: sendComment }, 'Отправить'))),
+          h('div', { class: 'comments' }, h('h2', null, 'Комментарии'), commentsBox, h('div', { class: 'mention-wrap' }, commentInput, mentionList), h('div', { class: 'modal-actions' }, h('button', { class: 'btn danger small', onclick: remove }, 'Удалить задачу'), h('button', { class: 'btn small', onclick: sendComment }, 'Отправить'))),
         ),
       );
       document.body.append(overlay);

@@ -222,6 +222,14 @@ r = await alice('GET', `/api/tasks/${t1.id}/comments`);
 assert.equal(r.data.comments[0].author, 'Bob');
 ok('комментарии');
 
+r = await alice('POST', `/api/tasks/${t1.id}/comments`, { body: 'Проверь, @bob, пожалуйста' });
+assert.equal(r.status, 201);
+r = await bob('GET', '/api/inbox');
+assert.ok(r.data.comments.some((c) => c.body.includes('@bob') && c.mentioned === 1));
+r = await alice('GET', '/api/inbox');
+assert.ok(!r.data.comments.some((c) => c.mentioned === 1));
+ok('упоминания попадают во входящие');
+
 // ---------- удаление колонки, прогресс, каскады ----------
 
 r = await alice('GET', `/api/workspaces/${wsId}`);

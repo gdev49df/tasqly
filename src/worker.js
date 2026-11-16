@@ -416,13 +416,14 @@ route('GET', '/api/inbox', async ({ env, user }) => {
     .all();
   const since = now() - 14 * 24 * 3600 * 1000;
   const comments = await env.DB.prepare(
-    `SELECT cm.id, cm.body, cm.created_at, u.name AS author, t.id AS task_id, t.title, t.project_id
+    `SELECT cm.id, cm.body, cm.created_at, u.name AS author, t.id AS task_id, t.title, t.project_id,
+            EXISTS(SELECT 1 FROM mentions mn WHERE mn.comment_id = cm.id AND mn.user_id = ?1) AS mentioned
      FROM comments cm
      JOIN tasks t ON t.id = cm.task_id
      JOIN projects p ON p.id = t.project_id
      JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?1
      LEFT JOIN users u ON u.id = cm.user_id
-     WHERE (t.assignee_id = ?1 OR t.created_by = ?1)
+     WHERE (t.assignee_id = ?1 OR t.created_by = ?1 OR EXISTS(SELECT 1 FROM mentions mn WHERE mn.comment_id = cm.id AND mn.user_id = ?1))
        AND (cm.user_id IS NULL OR cm.user_id != ?1)
        AND cm.created_at > ?2
      ORDER BY cm.created_at DESC
@@ -818,13 +819,22 @@ route('GET', '/api/tasks/:id/comments', async ({ env, user, params }) => {
 });
 
 route('POST', '/api/tasks/:id/comments', async ({ env, user, params, body }) => {
-  await taskContext(env, params.id, user.id);
+  const task = await taskContext(env, params.id, user.id);
   const text = cleanString(body.body, 'комментарий', { max: 2000 });
   const id = newId();
   const ts = now();
   await env.DB.prepare('INSERT INTO comments (id, task_id, user_id, body, created_at) VALUES (?, ?, ?, ?, ?)')
     .bind(id, params.id, user.id, text, ts)
     .run();
+  // упоминания: @имя участника пространства (имя может состоять из нескольких слов)
+  const lower = text.toLowerCase();
+  if (lower.includes('@')) {
+    const { results: people } = await env.DB.prepare('SELECT u.id, u.name FROM members m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = ?')
+      .bind(task.workspace_id)
+      .all();
+    const hit = people.filter((p) => p.id !== user.id && p.name && lower.includes('@' + p.name.toLowerCase()));
+    for (const p of hit) await env.DB.prepare('INSERT OR IGNORE INTO mentions (comment_id, user_id) VALUES (?, ?)').bind(id, p.id).run();
+  }
   return json({ comment: { id, body: text, created_at: ts, user_id: user.id, author: user.name } }, 201);
 });
 

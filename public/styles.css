@@ -1778,3 +1778,11 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .onb-step.done .onb-t b { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
 .onb-step:not(.now):not(.done) { opacity: .6; }
 @media (max-width: 560px) { .onb-step { flex-wrap: wrap; } .onb-step .btn { margin-left: 38px; } }
+
+/* v8.9 упоминания */
+.mention { color: var(--accent); background: var(--accent-soft, rgba(198, 244, 50, .35)); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+.mention-wrap { position: relative; }
+.mention-list { position: absolute; left: 0; bottom: calc(100% + 4px); min-width: 200px; max-width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .14); padding: 4px; z-index: 5; }
+.mention-list[hidden] { display: none; }
+.mention-opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 8px; border-radius: 7px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+.mention-opt:hover { background: var(--bg-subtle); }
