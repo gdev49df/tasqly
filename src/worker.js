@@ -1718,7 +1718,39 @@ function withCors(res, origin) {
   return out;
 }
 
+// ---------- резервные копии ----------
+// раз в сутки по расписанию (cron) все таблицы, кроме сессий, файлов и счётчиков, копируются в kv на 14 дней
+const BACKUP_SKIP = new Set(['sessions', 'file_blobs', 'ai_usage']);
+const BACKUP_TTL = 14 * 24 * 3600;
+async function runBackup(env) {
+  if (!env.BACKUPS) return { skipped: 'нет привязки BACKUPS' };
+  const day = new Date().toISOString().slice(0, 10);
+  const { results: tables } = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all();
+  const summary = {};
+  for (const { name } of tables) {
+    if (BACKUP_SKIP.has(name) || !/^\w+$/.test(name)) continue;
+    const rows = [];
+    for (let offset = 0; ; offset += 2000) {
+      const { results } = await env.DB.prepare(`SELECT * FROM ${name} LIMIT 2000 OFFSET ${offset}`).all();
+      rows.push(...results);
+      if (results.length < 2000) break;
+    }
+    const data = JSON.stringify(rows);
+    if (data.length > 24_000_000) {
+      console.error(`backup: таблица ${name} больше 24 мб, пропущена`);
+      continue;
+    }
+    await env.BACKUPS.put(`b:${day}:${name}`, data, { expirationTtl: BACKUP_TTL });
+    summary[name] = rows.length;
+  }
+  await env.BACKUPS.put(`b:${day}:_index`, JSON.stringify({ at: now(), tables: summary }), { expirationTtl: BACKUP_TTL });
+  return { day, tables: summary };
+}
+
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runBackup(env).then((r) => console.log('backup', JSON.stringify(r))).catch((e) => console.error('backup failed', e)));
+  },
   async fetch(req, env) {
     const origin = allowedOrigin(req, env);
     if (req.method === 'OPTIONS') {

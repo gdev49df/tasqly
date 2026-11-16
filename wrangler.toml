@@ -20,3 +20,11 @@ database_id = "662c5b62-87e0-4ddd-80d0-bc426cad032b"
 # ai tasqly: cloudflare workers ai (ключ не нужен)
 [ai]
 binding = "AI"
+
+# резервные копии: ежедневный снимок таблиц в kv (хранится 14 дней)
+[[kv_namespaces]]
+binding = "BACKUPS"
+id = "df326e84442f4de3aa1151451388083c"
+
+[triggers]
+crons = ["30 21 * * *"]
