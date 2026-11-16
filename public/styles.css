@@ -1638,3 +1638,8 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .hero h1 em.wave { font-style: normal; position: relative; display: inline-block; }
 .hero h1 em.wave::after { content: ''; position: absolute; left: -1%; right: -1%; bottom: -.08em; height: .2em; min-height: 8px;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='9' viewBox='0 0 128 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.2C12 2 19 7.4 31 4.6S50 1.6 62 5.6 83 7.8 95 3.8s17-1.6 31 .9' fill='none' stroke='%23c6f432' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") no-repeat center / 100% 100%; }
+/* v7.8: подчёркивание «одной доске» — как от руки: неровный штрих, лёгкий наклон, хвостик */
+.hero h1 em.wave { white-space: nowrap; }
+.hero h1 em.wave::after { left: -2%; right: -3%; bottom: -.14em; height: .26em; min-height: 10px; transform: rotate(-.9deg); transform-origin: left center;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='14' viewBox='0 0 240 14' preserveAspectRatio='none'%3E%3Cpath d='M3 8.6C22 4.2 34 11.4 58 7.4S96 3 122 8s40 4.6 66-.4 36-3.4 49-1.4' fill='none' stroke='%23c6f432' stroke-width='3.6' stroke-linecap='round' stroke-linejoin='round' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M30 12.2c28-2.4 64-1.2 98-.2' fill='none' stroke='%23c6f432' stroke-width='2' stroke-linecap='round' opacity='.7' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") no-repeat center / 100% 100%; }
+@media (max-width: 480px) { .hero h1 em.wave { white-space: normal; } }

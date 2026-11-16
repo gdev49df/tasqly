@@ -1112,7 +1112,7 @@
           h(
             'div',
             { class: 'hero-copy' },
-            h('h1', null, 'Вся работа команды на одной ', h('em', { class: 'wave' }, 'доске')),
+            h('h1', null, 'Вся работа команды на ', h('em', { class: 'wave' }, 'одной доске')),
             h('p', null, 'tasqly собирает задачи, учёт времени, заметки, чат и файлы в одном пространстве. AI подскажет, что горит, и разобьёт большую задачу на шаги.'),
             h('div', { class: 'hero-cta' }, state.user ? h('a', { class: 'btn big', href: PANEL }, 'Открыть кабинет') : [h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Создать пространство'), h('a', { class: 'btn ghost big', href: PANEL + '#/login' }, 'Войти')]),
             h('div', { class: 'hero-note' }, 'Регистрация за минуту. Карта не нужна.'),
