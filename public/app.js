@@ -1327,26 +1327,38 @@
     nameInput.addEventListener('keydown', (e) => e.key === 'Enter' && create());
     codeInput.addEventListener('keydown', (e) => e.key === 'Enter' && join());
 
+    const hour = new Date().getHours();
+    const hello = hour < 5 ? 'Доброй ночи' : hour < 12 ? 'Доброе утро' : hour < 18 ? 'Добрый день' : 'Добрый вечер';
+    const plural = (n, one, few, many) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many}`;
+    const sum = (k) => workspaces.reduce((acc, w) => acc + (w[k] || 0), 0);
+    const arrow = () => { const sp = h('span', { class: 'ws-go', 'aria-hidden': 'true' }); sp.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10h10M11 5l5 5-5 5"/></svg>'; return sp; };
+    const stat = (n, one, few, many) => h('div', { class: 'home-stat' }, h('b', null, String(n)), h('span', null, plural(n, one, few, many).replace(/^\d+ /, '')));
+
     render(
       topbar([{ label: 'Пространства' }]),
       h(
         'div',
-        { class: 'container' },
-        h('h1', null, `Привет, ${state.user.name}`),
-        h('p', { class: 'sub' }, 'Выбери пространство или создай новое для своей команды'),
+        { class: 'container home' },
+        h('div', { class: 'home-hero' },
+          h('h1', null, `${hello}, `, h('em', { class: 'wave-u' }, state.user.name)),
+          h('p', { class: 'sub' }, workspaces.length ? 'Выбери пространство, чтобы продолжить работу.' : 'Создай первое пространство для своей команды.')),
         workspaces.length
-          ? h(
-              'div',
-              { class: 'grid' },
-              workspaces.map((w) => h('a', { class: 'tile', href: `#/w/${w.id}` }, h('div', { class: 'name' }, w.name), h('div', { class: 'meta' }, w.role === 'owner' ? 'Владелец' : 'Участник'))),
-            )
-          : h('div', { class: 'card empty' }, 'Пока нет пространств. Создай первое ниже.'),
-        h('div', { class: 'spacer' }),
-        h(
-          'div',
-          { class: 'grid' },
-          h('div', { class: 'card' }, h('h2', null, 'Новое пространство'), h('div', { class: 'row' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Создать'))),
-          h('div', { class: 'card' }, h('h2', null, 'Вступить по коду'), h('div', { class: 'row' }, codeInput, h('button', { class: 'btn ghost', onclick: join }, 'Вступить'))),
+          ? h('div', { class: 'home-stats' }, stat(workspaces.length, 'пространство', 'пространства', 'пространств'), stat(sum('projects'), 'проект', 'проекта', 'проектов'), stat(sum('my_open'), 'моя открытая задача', 'моих открытых задачи', 'моих открытых задач'))
+          : null,
+        workspaces.length
+          ? h('div', { class: 'ws-grid' }, workspaces.map((w) =>
+              h('a', { class: 'ws-card', href: `#/w/${w.id}` },
+                h('div', { class: 'ws-top' },
+                  h('span', { class: 'ws-ava' }, (w.name.trim()[0] || '?').toUpperCase()),
+                  h('span', { class: `pill ws-role${w.role === 'owner' ? ' owner' : ''}` }, w.role === 'owner' ? 'Владелец' : 'Участник')),
+                h('div', { class: 'ws-name' }, w.name),
+                h('div', { class: 'ws-meta' }, plural(w.projects, 'проект', 'проекта', 'проектов'), h('i', null), plural(w.members, 'участник', 'участника', 'участников')),
+                h('div', { class: 'ws-foot' }, w.my_open ? h('span', { class: 'ws-open' }, plural(w.my_open, 'задача', 'задачи', 'задач'), ' у тебя') : h('span', { class: 'ws-clear' }, 'Нет открытых задач'), arrow()))))
+          : h('div', { class: 'home-empty' }, h('b', null, 'Пока нет пространств'), h('span', null, 'Пространство — это место, где живут проекты, заметки, чат и файлы команды.')),
+        h('h2', { class: 'home-h2' }, 'Новое'),
+        h('div', { class: 'home-new' },
+          h('div', { class: 'home-act' }, h('div', { class: 'act-ic' }, '+'), h('div', { class: 'act-body' }, h('h3', null, 'Создать пространство'), h('p', null, 'Для команды, клиента или личных дел.'), h('div', { class: 'row' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Создать')))),
+          h('div', { class: 'home-act' }, h('div', { class: 'act-ic key' }, '#'), h('div', { class: 'act-body' }, h('h3', null, 'Вступить по коду'), h('p', null, 'Код приглашения пришлёт владелец пространства.'), h('div', { class: 'row' }, codeInput, h('button', { class: 'btn ghost', onclick: join }, 'Вступить')))),
         ),
       ),
     );

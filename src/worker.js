@@ -416,10 +416,15 @@ route('GET', '/api/inbox', async ({ env, user }) => {
 
 route('GET', '/api/workspaces', async ({ env, user }) => {
   const { results } = await env.DB.prepare(
-    `SELECT w.id, w.name, m.role FROM workspaces w
+    `SELECT w.id, w.name, m.role,
+       (SELECT COUNT(*) FROM projects p WHERE p.workspace_id = w.id) AS projects,
+       (SELECT COUNT(*) FROM members x WHERE x.workspace_id = w.id) AS members,
+       (SELECT COUNT(*) FROM tasks t JOIN projects p ON p.id = t.project_id JOIN columns c ON c.id = t.column_id
+         WHERE p.workspace_id = w.id AND t.assignee_id = ? AND c.is_done = 0) AS my_open
+     FROM workspaces w
      JOIN members m ON m.workspace_id = w.id WHERE m.user_id = ? ORDER BY w.created_at`,
   )
-    .bind(user.id)
+    .bind(user.id, user.id)
     .all();
   return json({ workspaces: results });
 });

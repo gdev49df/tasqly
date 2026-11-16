@@ -1088,7 +1088,7 @@ a.btn:hover { text-decoration: none; }
 .track-now b { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-now .timer-live { font-variant-numeric: tabular-nums; }
 .track-now .rec { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); animation: tq-blink 1.4s infinite; }
-@media (max-width: 860px) { .track-btn span { display: none; } .track-btn { padding: 0; width: 34px; justify-content: center; } }
+@media (max-width: 860px) { .track-btn span:not(.ico) { display: none; } .track-btn { padding: 0; width: 34px; justify-content: center; } }
 
 /* ---------- ai: приветствие, карточки, поле-капсула ---------- */
 .chat { background: radial-gradient(120% 70% at 85% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), radial-gradient(90% 60% at 0% 100%, color-mix(in srgb, #3e9bff 12%, transparent), transparent 60%), var(--surface); }
@@ -1673,3 +1673,48 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 /* запасной вариант: мягкое затухание цветов */
 .theme-fade, .theme-fade *, .theme-fade *::before, .theme-fade *::after { transition: background-color .45s ease, color .45s ease, border-color .45s ease, fill .45s ease, stroke .45s ease, box-shadow .45s ease !important; }
 @media (prefers-reduced-motion: reduce) { .theme-toggle svg { transition: none; } }
+
+/* v8.3: главная кабинета — приветствие, сводка, крупные карточки пространств */
+.container.home { max-width: 1000px; padding-top: 44px; }
+.home-hero h1 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.04em; line-height: 1.1; margin: 0 0 10px; font-weight: 700; }
+.home-hero .sub { margin: 0 0 26px; font-size: 16px; }
+.wave-u { font-style: normal; position: relative; display: inline-block; }
+.wave-u::after { content: ''; position: absolute; left: -2%; right: -3%; bottom: -.2em; height: .24em; min-height: 7px; transform: rotate(-1deg);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='14' viewBox='0 0 260 14' preserveAspectRatio='none'%3E%3Cpath d='M4 8.4C18 4 30 11.4 52 7.4S84 3 104 8.6 138 11 160 6.4s34-4 52-1 28 2 44-3' fill='none' stroke='%23c6f432' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") no-repeat center / 100% 100%; }
+.home-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+.home-stat { display: flex; align-items: baseline; gap: 8px; padding: 10px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-subtle); }
+.home-stat b { font-size: 22px; letter-spacing: -0.03em; }
+.home-stat span { color: var(--muted); font-size: 13.5px; }
+.ws-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+.ws-card { display: flex; flex-direction: column; gap: 6px; padding: 20px; border: 1px solid var(--border); border-radius: 18px; background: var(--bg-subtle); color: var(--text); text-decoration: none;
+  transition: transform .3s var(--ease-out), border-color .2s, background .2s, box-shadow .3s; }
+.ws-card:hover { transform: translateY(-4px); border-color: var(--border-strong); text-decoration: none; box-shadow: 0 14px 34px -18px rgba(0,0,0,.45); }
+.ws-card:active { transform: scale(.985); transition-duration: .08s; }
+.ws-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.ws-ava { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; font-weight: 700; font-size: 20px; background: var(--lime); color: #101300; transition: transform .3s var(--ease-out); }
+.ws-card:hover .ws-ava { transform: rotate(-6deg) scale(1.06); }
+.ws-role { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: var(--hover); color: var(--muted); }
+.ws-role.owner { background: color-mix(in srgb, var(--lime) 22%, transparent); color: var(--text); }
+.ws-name { font-size: 19px; font-weight: 650; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.ws-meta { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; }
+.ws-meta i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .6; }
+.ws-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13.5px; }
+.ws-open { font-weight: 600; }
+.ws-open::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--lime); margin-right: 8px; }
+.ws-clear { color: var(--faint); }
+.ws-go { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--hover); transition: transform .3s var(--ease-out), background .2s, color .2s; }
+.ws-card:hover .ws-go { transform: translateX(3px); background: var(--lime); color: #101300; }
+.home-empty { display: grid; gap: 6px; padding: 34px; border: 1px dashed var(--border-strong); border-radius: 18px; text-align: center; color: var(--muted); }
+.home-empty b { color: var(--text); font-size: 17px; }
+.home-h2 { margin: 36px 0 14px; font-size: 20px; letter-spacing: -0.03em; }
+.home-new { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.home-act { display: flex; gap: 14px; padding: 20px; border: 1px solid var(--border); border-radius: 18px; background: var(--bg-subtle); }
+.act-ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; font-weight: 600; background: var(--lime); color: #101300; }
+.act-ic.key { background: var(--hover); color: var(--text); }
+.act-body { flex: 1; min-width: 0; }
+.act-body h3 { margin: 0 0 2px; font-size: 16px; }
+.act-body p { margin: 0 0 12px; color: var(--muted); font-size: 13.5px; }
+.act-body .row { display: flex; gap: 8px; }
+.act-body .row input { flex: 1; min-width: 0; }
+@media (max-width: 600px) { .home-act { flex-direction: column; } .ws-grid { grid-template-columns: 1fr; } }
+.home-h2 { color: var(--text); }
