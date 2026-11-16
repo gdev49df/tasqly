@@ -440,7 +440,8 @@
         'aside',
         { class: 'drawer', role: 'dialog', 'aria-label': 'Меню' },
         h('div', { class: 'drawer-head' }, logoEl({ onclick: close }), h('button', { class: 'icon-btn', 'aria-label': 'Закрыть меню', onclick: close }, '✕')),
-        h('button', { class: 'drawer-item', onclick: go('#/') }, icon('home'), 'Главная'),
+        h('button', { class: 'drawer-item', onclick: go('#/') }, icon('home'), 'Кабинет'),
+        h('button', { class: 'drawer-item', onclick: go('#/about') }, icon('spark'), 'О tasqly'),
         h('button', { class: 'drawer-item', onclick: () => (close(), openInbox(document.querySelector('.mail-btn'))) }, icon('mail'), 'Входящие'),
         h('div', { class: 'drawer-title' }, 'Пространства'),
         list,
@@ -558,6 +559,7 @@
       },
       '-',
       { label: 'Сменить пароль', onClick: openPasswordModal },
+      { label: 'О tasqly (главная страница)', onClick() { location.hash = '#/about'; } },
       '-',
       { label: 'Выйти', danger: true, onClick: logout },
     ]);

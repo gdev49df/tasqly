@@ -648,7 +648,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .bubble .who { font-size: 12px; font-weight: 600; color: var(--accent); }
 .bubble .text { white-space: pre-wrap; word-break: break-word; }
 .bubble .when { font-size: 11px; opacity: 0.6; text-align: right; margin-top: 1px; font-variant-numeric: tabular-nums; }
-.chat-input { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 90%, transparent); }
+.chat-input { display: flex; gap: 8px; padding: 10px; background: color-mix(in srgb, var(--surface) 90%, transparent); }
 .chat-input textarea { min-height: 38px; height: 38px; resize: none; flex: 1; }
 
 /* диск */
@@ -682,8 +682,8 @@ input[type='number']:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .ai-hello b { color: var(--text); font-size: 16px; letter-spacing: -0.01em; }
 .msg.pending .bubble { opacity: 0.6; }
 .msg.failed .bubble { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 10px 0; }
-.chip-btn { border: 1px solid var(--border); background: transparent; border-radius: 99px; padding: 4px 12px; color: var(--muted); font-size: 13px; transition: background 0.12s, color 0.12s, transform 0.12s var(--ease-out); }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 10px; border-top: 1px solid var(--border); }
+.chip-btn { border: 1px solid var(--border); background: transparent; border-radius: 99px; padding: 6px 14px; line-height: 1.2; white-space: nowrap; color: var(--muted); font-size: 13px; transition: background 0.12s, color 0.12s, transform 0.12s var(--ease-out); }
 .chip-btn:hover { background: var(--hover); color: var(--text); }
 .chip-btn:active { transform: scale(0.96); }
 .ai-side textarea { min-height: 110px; }
