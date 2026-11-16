@@ -879,3 +879,7 @@ a.btn:hover { text-decoration: none; }
   .land-cta { margin: 48px 12px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .demo-card.travel { animation: none; } }
+
+/* в верхней панели — только знак */
+.topbar .logo span { display: none; }
+.topbar .logo-mark { width: 30px; height: 30px; }
