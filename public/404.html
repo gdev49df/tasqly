@@ -13,21 +13,24 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500;600&display=swap">
   <link rel="stylesheet" href="/styles.css">
   <style>
-    .nf { min-height: calc(100vh - 80px); display: grid; place-content: center; justify-items: center; gap: 14px; padding: 40px 20px; text-align: center; }
-    .nf .logo-mark { width: 44px; height: 44px; color: var(--accent); }
-    .nf-code { font-size: clamp(88px, 22vw, 168px); font-weight: 800; letter-spacing: -0.06em; line-height: 1; margin: 6px 0 0; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 35%, var(--text))); -webkit-background-clip: text; background-clip: text; color: transparent; animation: tq-page .5s var(--ease-out); }
-    .nf h1 { font-size: 22px; letter-spacing: -0.02em; margin: 0; }
+    body { overflow-x: hidden; }
+    .nf { position: relative; min-height: calc(100vh - 80px); display: grid; place-content: center; justify-items: center; gap: 14px; padding: 40px 20px; text-align: center; }
+    .nf::before { content: ''; position: absolute; inset: 0; z-index: -1; background-image: radial-gradient(color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.4px); background-size: 26px 26px; -webkit-mask-image: radial-gradient(ellipse 55% 50% at 50% 48%, #000, transparent 75%); mask-image: radial-gradient(ellipse 55% 50% at 50% 48%, #000, transparent 75%); }
+    .nf .logo { font-size: 24px; margin-bottom: 18px; }
+    .nf-code { display: flex; align-items: center; justify-content: center; gap: clamp(2px, 1vw, 10px); font-size: clamp(110px, 26vw, 210px); font-weight: 800; letter-spacing: -0.06em; line-height: .9; margin: 0; color: var(--text); animation: tq-page .5s var(--ease-out); }
+    .nf-code i { font-style: normal; display: inline-grid; place-items: center; width: .66em; height: .66em; border-radius: 50%; background: var(--lime); color: var(--lime-ink); font-size: 1em; position: relative; animation: nf-float 4s ease-in-out infinite; }
+    .nf-code i::after { content: ':('; position: absolute; font-size: .2em; letter-spacing: 0; font-weight: 700; transform: rotate(90deg); }
+    .nf h1 { font-size: 24px; letter-spacing: -0.03em; margin: 10px 0 0; font-weight: 650; }
     .nf p { color: var(--muted); max-width: 380px; margin: 0; line-height: 1.55; }
-    .nf-cta { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
-    @media (prefers-reduced-motion: reduce) { .nf-code { animation: none; } }
+    .nf-cta { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+    @keyframes nf-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    @media (prefers-reduced-motion: reduce) { .nf-code, .nf-code i { animation: none; } }
   </style>
 </head>
 <body>
   <main class="nf">
-    <a href="/" aria-label="tasqly">
-      <svg class="logo-mark" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="currentColor"/><g fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g></svg>
-    </a>
-    <div class="nf-code" aria-hidden="true">404</div>
+    <a class="logo" href="/" aria-label="tasqly"><span class="logo-word">tasqly</span></a>
+    <div class="nf-code" aria-hidden="true">4<i></i>4</div>
     <h1>страница не найдена</h1>
     <p>такой страницы нет: возможно, ссылка устарела или в адресе опечатка.</p>
     <div class="nf-cta">
