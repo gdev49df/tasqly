@@ -263,7 +263,7 @@ const PROJECT_KINDS = {
 };
 const TASK_TYPES = ['task', 'bug', 'feature', 'debt'];
 const MAX_FILE_BYTES = 1_000_000;
-const MAX_WORKSPACE_FILES_BYTES = 20_000_000;
+const MAX_WORKSPACE_FILES_BYTES = 40_000_000;
 
 function validateKind(value) {
   if (value === undefined) return 'basic';
@@ -306,6 +306,17 @@ const TASK_SELECT = `SELECT t.id, t.project_id, t.column_id, t.title, t.descript
     (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id AND i.done = 1) AS check_done,
     (SELECT group_concat(label_id) FROM task_labels tl WHERE tl.task_id = t.id) AS label_ids
   FROM tasks t`;
+
+// история изменений задачи: kind + detail (json {from, to}), без ошибок для основного действия
+async function logEvent(env, taskId, userId, kind, detail) {
+  try {
+    await env.DB.prepare('INSERT INTO task_events (id, task_id, user_id, kind, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(newId(), taskId, userId, kind, detail === undefined ? null : JSON.stringify(detail), now())
+      .run();
+  } catch {
+    /* история не должна ломать действие */
+  }
+}
 
 const shapeTask = (row) => ({ ...row, label_ids: row.label_ids ? row.label_ids.split(',') : [] });
 
@@ -524,7 +535,7 @@ const LIMITS = {
   projects_per_workspace: 30,
   tasks_per_project: 500,
   notes_per_workspace: 100,
-  files_per_workspace: 100,
+  files_per_workspace: 200,
 };
 async function capCount(env, table, col, id, max, what) {
   const row = await env.DB.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${col} = ?`).bind(id).first();
@@ -830,6 +841,7 @@ route('POST', '/api/projects/:id/tasks', async ({ env, user, params, body }) => 
   )
     .bind(id, params.id, columnId, title, description, priority, assigneeId, dueDate, position, user.id, ts, ts, taskType, estimate, repeat)
     .run();
+  await logEvent(env, id, user.id, 'created');
   return json({ task: await loadTask(env, id) }, 201);
 });
 
@@ -885,9 +897,35 @@ route('PATCH', '/api/tasks/:id', async ({ env, user, params, body }) => {
       .bind(nid, spawn.column, spawn.due, pos, ts, ts, spawn.repeat, params.id)
       .run();
     await env.DB.prepare('INSERT INTO task_labels (task_id, label_id) SELECT ?, label_id FROM task_labels WHERE task_id = ?').bind(nid, params.id).run();
+    await logEvent(env, nid, user.id, 'created', { repeat: true });
     spawned = await loadTask(env, nid);
   }
-  return json({ task: await loadTask(env, params.id), spawned });
+  const after = await loadTask(env, params.id);
+  // что изменилось: пишем в историю с понятными именами
+  const changed = [];
+  const names = async (table, ids) => {
+    const list = ids.filter(Boolean);
+    if (!list.length) return {};
+    const { results } = await env.DB.prepare(`SELECT id, name FROM ${table} WHERE id IN (${list.map(() => '?').join(',')})`).bind(...list).all();
+    return Object.fromEntries(results.map((r) => [r.id, r.name]));
+  };
+  if (after.title !== task.title) changed.push(['title', { from: task.title, to: after.title }]);
+  if (after.description !== task.description) changed.push(['description']);
+  if (after.column_id !== task.column_id) {
+    const n = await names('columns', [task.column_id, after.column_id]);
+    changed.push(['column', { from: n[task.column_id] || '', to: n[after.column_id] || '' }]);
+  }
+  if (after.priority !== task.priority) changed.push(['priority', { from: task.priority, to: after.priority }]);
+  if (after.assignee_id !== task.assignee_id) {
+    const n = await names('users', [task.assignee_id, after.assignee_id]);
+    changed.push(['assignee', { from: n[task.assignee_id] || '', to: n[after.assignee_id] || '' }]);
+  }
+  if (after.due_date !== task.due_date) changed.push(['due', { from: task.due_date, to: after.due_date }]);
+  if (after.task_type !== task.task_type) changed.push(['type', { from: task.task_type, to: after.task_type }]);
+  if (after.estimate_min !== task.estimate_min) changed.push(['estimate', { from: task.estimate_min, to: after.estimate_min }]);
+  if (!spawn && after.repeat !== task.repeat) changed.push(['repeat', { from: task.repeat, to: after.repeat }]);
+  for (const [kind, detail] of changed) await logEvent(env, params.id, user.id, kind, detail);
+  return json({ task: after, spawned });
 });
 
 route('PUT', '/api/tasks/:id/labels', async ({ env, user, params, body }) => {
@@ -899,12 +937,33 @@ route('PUT', '/api/tasks/:id/labels', async ({ env, user, params, body }) => {
     const ok = await env.DB.prepare('SELECT 1 FROM labels WHERE id = ? AND workspace_id = ?').bind(id, task.workspace_id).first();
     if (!ok) fail(400, 'метка не из этого пространства');
   }
+  const prev = await env.DB.prepare('SELECT label_id FROM task_labels WHERE task_id = ?').bind(params.id).all();
+  const prevIds = prev.results.map((r) => r.label_id);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM task_labels WHERE task_id = ?').bind(params.id),
     ...ids.map((id) => env.DB.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').bind(params.id, id)),
     env.DB.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').bind(now(), params.id),
   ]);
+  const added = ids.filter((x) => !prevIds.includes(x));
+  const removed = prevIds.filter((x) => !ids.includes(x));
+  if (added.length || removed.length) {
+    const all = [...added, ...removed];
+    const { results } = await env.DB.prepare(`SELECT id, name FROM labels WHERE id IN (${all.map(() => '?').join(',')})`).bind(...all).all();
+    const nm = Object.fromEntries(results.map((r) => [r.id, r.name]));
+    await logEvent(env, params.id, user.id, 'labels', { added: added.map((x) => nm[x]).filter(Boolean), removed: removed.map((x) => nm[x]).filter(Boolean) });
+  }
   return json({ task: await loadTask(env, params.id) });
+});
+
+route('GET', '/api/tasks/:id/history', async ({ env, user, params }) => {
+  await taskContext(env, params.id, user.id);
+  const { results } = await env.DB.prepare(
+    `SELECT e.id, e.kind, e.detail, e.created_at, u.name AS author FROM task_events e LEFT JOIN users u ON u.id = e.user_id
+     WHERE e.task_id = ? ORDER BY e.created_at DESC, e.rowid DESC LIMIT 60`,
+  )
+    .bind(params.id)
+    .all();
+  return json({ events: results.map((e) => ({ ...e, detail: e.detail ? JSON.parse(e.detail) : null })) });
 });
 
 route('DELETE', '/api/tasks/:id', async ({ env, user, params }) => {
@@ -1219,7 +1278,7 @@ route('POST', '/api/workspaces/:id/files', async ({ env, user, params, body }) =
   if (size > MAX_FILE_BYTES) fail(413, 'файл больше 1 мб');
   await capCount(env, 'files', 'workspace_id', params.id, LIMITS.files_per_workspace, 'файлов в пространстве');
   const used = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS s FROM files WHERE workspace_id = ?').bind(params.id).first();
-  if (used.s + size > MAX_WORKSPACE_FILES_BYTES) fail(413, 'место в пространстве закончилось (20 мб)');
+  if (used.s + size > MAX_WORKSPACE_FILES_BYTES) fail(413, 'место в пространстве закончилось (40 мб)');
   const id = newId();
   const ts = now();
   await env.DB.batch([

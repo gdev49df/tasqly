@@ -249,6 +249,24 @@ ok('упоминания попадают во входящие');
   ok('повторяющиеся задачи: закрытие создаёт следующую копию');
 }
 
+// ---------- история задачи ----------
+{
+  const pr = await alice('GET', `/api/projects/${t1.project_id}`);
+  const hcol = pr.data.columns.find((c) => c.id !== t1.column_id);
+  const ht = (await alice('POST', `/api/projects/${t1.project_id}/tasks`, { title: 'История' })).data.task;
+  await alice('PATCH', `/api/tasks/${ht.id}`, { title: 'История 2', priority: 3, column_id: hcol.id });
+  r = await bob('GET', `/api/tasks/${ht.id}/history`);
+  assert.equal(r.status, 200);
+  const kinds = r.data.events.map((e) => e.kind);
+  for (const k of ['created', 'title', 'priority', 'column']) assert.ok(kinds.includes(k), `нет события ${k}`);
+  const col = r.data.events.find((e) => e.kind === 'column');
+  assert.equal(col.detail.to, hcol.name);
+  assert.equal(col.author, 'Alice');
+  assert.equal((await client()('GET', `/api/tasks/${ht.id}/history`)).status, 401);
+  await alice('DELETE', `/api/tasks/${ht.id}`, {});
+}
+ok('история задачи: создание, переименование, приоритет и перенос записываются');
+
 // ---------- удаление колонки, прогресс, каскады ----------
 
 r = await alice('GET', `/api/workspaces/${wsId}`);
