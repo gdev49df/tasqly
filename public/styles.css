@@ -1839,3 +1839,14 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 @media (max-width: 640px) { .ev { flex-direction: column; gap: 0; } .ev-when { width: auto; } }
 
 .legal h2 { color: var(--text); font-size: 19px; }
+
+/* v9.6 роли */
+.role-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1; padding: 4px 9px; border-radius: 99px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); font-weight: 600; white-space: nowrap; }
+.role-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+.member-chip { gap: 8px; padding-right: 6px; }
+.member-chip.editable { cursor: pointer; font: inherit; color: inherit; }
+.member-chip.editable:hover { border-color: var(--muted); }
+.roles-list { display: grid; gap: 4px; max-height: 38vh; overflow-y: auto; }
+.role-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.role-row .role-badge { flex: none; min-width: 0; }
+.role-row .sub { margin: 0; }

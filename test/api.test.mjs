@@ -526,6 +526,50 @@ ok('публичная ссылка: только просмотр, без ли�
   assert.equal((await alice('GET', `/api/workspaces/${dw.id}`)).status, 404);
 }
 ok('удаление пространства: только владелец');
+{
+  const rw = (await alice('POST', '/api/workspaces', { name: 'роли' })).data.workspace;
+  const rp = (await alice('POST', `/api/workspaces/${rw.id}/projects`, { name: 'П' })).data.project;
+  const rcode = (await alice('GET', `/api/workspaces/${rw.id}`)).data.workspace.invite_code;
+  const carol = client();
+  const cr = await carol('POST', '/api/auth/register', { email: `carol${run}@test.dev`, name: 'Carol', password: 'password123' });
+  await bob('POST', '/api/workspaces/join', { code: rcode });
+  await carol('POST', '/api/workspaces/join', { code: rcode });
+  const bobId = (await bob('GET', '/api/me')).data.user.id;
+  const carolId = cr.data.user.id;
+  // наблюдатель
+  r = await alice('PATCH', `/api/workspaces/${rw.id}/members/${bobId}`, { level: 'viewer' });
+  assert.equal(r.status, 200);
+  r = await bob('POST', `/api/projects/${rp.id}/tasks`, { title: 'нельзя' });
+  assert.equal(r.status, 403);
+  assert.match(r.data.error, /Наблюдатель/);
+  assert.equal((await bob('GET', `/api/projects/${rp.id}`)).status, 200, 'наблюдатель видит проект');
+  const task = (await alice('POST', `/api/projects/${rp.id}/tasks`, { title: 'Задача' })).data.task;
+  assert.equal((await bob('POST', `/api/tasks/${task.id}/comments`, { body: 'вижу' })).status, 201, 'наблюдатель комментирует');
+  assert.equal((await bob('PATCH', `/api/tasks/${task.id}`, { title: 'взлом' })).status, 403);
+  assert.equal((await bob('POST', `/api/workspaces/${rw.id}/messages`, { body: 'привет' })).status, 201, 'наблюдатель пишет в чат');
+  // свои роли
+  r = await alice('POST', `/api/workspaces/${rw.id}/roles`, { name: 'Дизайнер', color: '#d6409f', level: 'member' });
+  assert.equal(r.status, 201);
+  const roleId = r.data.role.id;
+  assert.equal((await bob('POST', `/api/workspaces/${rw.id}/roles`, { name: 'x', color: '#d6409f' })).status, 403);
+  await alice('PATCH', `/api/workspaces/${rw.id}/members/${bobId}`, { role_id: roleId });
+  r = await bob('GET', `/api/workspaces/${rw.id}`);
+  const bm = r.data.members.find((m) => m.id === bobId);
+  assert.equal(bm.role_name, 'Дизайнер');
+  assert.equal(bm.role, 'member');
+  assert.equal((await bob('POST', `/api/projects/${rp.id}/tasks`, { title: 'теперь можно' })).status, 201);
+  // администратор
+  await alice('PATCH', `/api/workspaces/${rw.id}/members/${bobId}`, { level: 'admin' });
+  assert.equal((await bob('PATCH', `/api/workspaces/${rw.id}/members/${carolId}`, { level: 'admin' })).status, 403, 'админ не назначает админов');
+  assert.equal((await bob('PATCH', `/api/workspaces/${rw.id}/members/${carolId}`, { level: 'viewer' })).status, 200);
+  assert.equal((await bob('DELETE', `/api/workspaces/${rw.id}`, {})).status, 403, 'админ не удаляет пространство');
+  assert.equal((await bob('DELETE', `/api/workspaces/${rw.id}/members/${carolId}`, {})).status, 200, 'админ убирает участника');
+  assert.equal((await alice('DELETE', `/api/workspaces/${rw.id}/members/${(await alice('GET', '/api/me')).data.user.id}`, {})).status, 403, 'владелец не выходит');
+  assert.equal((await alice('DELETE', `/api/roles/${roleId}`, {})).status, 200);
+  r = await alice('GET', `/api/workspaces/${rw.id}`);
+  assert.equal(r.data.members.find((m) => m.id === bobId).role_name, 'Администратор');
+}
+ok('роли: наблюдатель, свои роли, администратор, выход и удаление участников');
 ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
 
 // лимиты на количество объектов

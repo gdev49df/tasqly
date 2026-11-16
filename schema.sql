@@ -26,10 +26,22 @@ CREATE TABLE IF NOT EXISTS workspaces (
   created_at INTEGER NOT NULL
 );
 
+-- свои роли пространства: название и цвет поверх уровня доступа (admin | member | viewer)
+CREATE TABLE IF NOT EXISTS workspace_roles (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'member',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wroles_ws ON workspace_roles(workspace_id);
+
 CREATE TABLE IF NOT EXISTS members (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'member', -- owner | member
+  role TEXT NOT NULL DEFAULT 'member', -- уровень: owner | admin | member | viewer
+  role_id TEXT REFERENCES workspace_roles(id) ON DELETE SET NULL,
   joined_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, user_id)
 );

@@ -14,6 +14,7 @@
   const state = { user: null };
   let cleanup = null; // снимает обработчики текущего экрана при переходе
 
+  const isAdmin = (r) => r === 'owner' || r === 'admin';
   const PRIORITIES = ['Без приоритета', 'Низкий', 'Средний', 'Высокий'];
   const LABEL_COLORS = ['#e5484d', '#f76b15', '#f5a524', '#30a46c', '#12a594', '#3e63dd', '#8e4ec6', '#d6409f'];
   const AVATAR_COLORS = ['#3e3e3a', '#30a46c', '#e5484d', '#f76b15', '#12a594', '#8e4ec6', '#d6409f', '#3e63dd'];
@@ -1652,7 +1653,7 @@
               h('a', { class: 'ws-card', href: `#/w/${w.id}` },
                 h('div', { class: 'ws-top' },
                   h('span', { class: 'ws-ava' }, (w.name.trim()[0] || '?').toUpperCase()),
-                  h('span', { class: `pill ws-role${w.role === 'owner' ? ' owner' : ''}` }, w.role === 'owner' ? 'Владелец' : 'Участник')),
+                  h('span', { class: `pill ws-role${w.role === 'owner' ? ' owner' : ''}` }, ({ owner: 'Владелец', admin: 'Администратор', viewer: 'Наблюдатель' })[w.role] || 'Участник')),
                 h('div', { class: 'ws-name' }, w.name),
                 h('div', { class: 'ws-meta' }, plural(w.projects, 'проект', 'проекта', 'проектов'), h('i', null), plural(w.members, 'участник', 'участника', 'участников')),
                 h('div', { class: 'ws-foot' }, w.my_open ? h('span', { class: 'ws-open' }, plural(w.my_open, 'задача', 'задачи', 'задач'), ' у тебя') : h('span', { class: 'ws-clear' }, 'Нет открытых задач'), arrow()))))
@@ -1775,7 +1776,7 @@
     );
   }
 
-  function panelProjects(id, { workspace, members, projects }) {
+  function panelProjects(id, { workspace, members, projects, roles = [], default_roles: defRoles = {} }) {
     const nameInput = h('input', { type: 'text', placeholder: 'Название проекта', maxlength: 80 });
     let kind = 'basic';
     const kindBox = h('div', { class: 'kinds' });
@@ -1796,6 +1797,74 @@
       }
     };
     nameInput.addEventListener('keydown', (e) => e.key === 'Enter' && create());
+
+    // участники и роли
+    const refresh = () => { cacheClear(); quietRoute = true; route(); };
+    const roleBadge = (m) => h('span', { class: 'role-badge', style: `--c:${m.role_color}` }, m.role_name);
+    async function setRole(m, body) {
+      try { await api.patch(`/api/workspaces/${id}/members/${m.id}`, body); toast('Роль изменена'); refresh(); } catch (e) { toast(e.message); }
+    }
+    async function kick(m) {
+      if (!confirm(`Убрать ${m.name} из пространства?`)) return;
+      try { await api.del(`/api/workspaces/${id}/members/${m.id}`); toast('Участник убран'); refresh(); } catch (e) { toast(e.message); }
+    }
+    async function leaveWs() {
+      if (!confirm(`Выйти из пространства «${workspace.name}»?`)) return;
+      try { await api.del(`/api/workspaces/${id}/members/${state.user.id}`); cacheClear(); toast('Ты вышел из пространства'); location.hash = '#/'; } catch (e) { toast(e.message); }
+    }
+    function memberChip(m) {
+      const content = [avatar(m.name), m.name, roleBadge(m)];
+      const canEdit = isAdmin(workspace.role) && m.role !== 'owner' && m.id !== state.user.id && !(m.role === 'admin' && workspace.role !== 'owner');
+      if (!canEdit) return h('span', { class: 'chip member-chip' }, ...content);
+      return h('button', {
+        class: 'chip member-chip editable', type: 'button', title: 'Изменить роль',
+        onclick: (e) => openMenu(e.currentTarget, [
+          { label: `${m.name}`, disabled: true, onClick() {} },
+          ...(workspace.role === 'owner' ? [{ label: 'Администратор', onClick: () => setRole(m, { level: 'admin' }) }] : []),
+          { label: 'Участник', onClick: () => setRole(m, { level: 'member' }) },
+          { label: 'Наблюдатель', onClick: () => setRole(m, { level: 'viewer' }) },
+          ...roles.filter((r) => r.level !== 'admin' || workspace.role === 'owner').map((r) => ({ label: r.name, onClick: () => setRole(m, { role_id: r.id }) })),
+          '-',
+          { label: 'Убрать из пространства', danger: true, onClick: () => kick(m) },
+        ]),
+      }, ...content);
+    }
+    function openRoles() {
+      const overlay = h('div', { class: 'overlay' });
+      const close = () => closeOverlay(overlay);
+      overlay.addEventListener('tq-close', close);
+      overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+      const list = h('div', { class: 'roles-list' });
+      const nameIn = h('input', { type: 'text', placeholder: 'Название роли, например «Дизайнер»', maxlength: 30, 'aria-label': 'Название роли' });
+      const levelSel = h('select', { 'aria-label': 'Уровень доступа' }, h('option', { value: 'member' }, 'Права участника'), h('option', { value: 'viewer' }, 'Права наблюдателя'), workspace.role === 'owner' ? h('option', { value: 'admin' }, 'Права администратора') : null);
+      let color = LABEL_COLORS[5];
+      const sw = h('span', { class: 'row', style: 'gap:4px' });
+      const paintSw = () => sw.replaceChildren(...LABEL_COLORS.map((c) => h('button', { type: 'button', class: `swatch${c === color ? ' on' : ''}`, style: `background:${c}`, 'aria-label': c, onclick: () => ((color = c), paintSw()) })));
+      paintSw();
+      const LEVEL_TXT = { admin: 'администратор', member: 'участник', viewer: 'наблюдатель' };
+      const paintList = () => list.replaceChildren(
+        ...Object.entries(defRoles).map(([k, r]) => h('div', { class: 'role-row' }, h('span', { class: 'role-badge', style: `--c:${r.color}` }, r.name), h('span', { class: 'sub' }, { owner: 'всё, включая удаление пространства', admin: 'участники, роли, удаление проектов, публичные ссылки', member: 'задачи, заметки, файлы, чат', viewer: 'только смотрит и комментирует' }[k]))),
+        ...roles.map((r) => h('div', { class: 'role-row' }, h('span', { class: 'role-badge', style: `--c:${r.color}` }, r.name), h('span', { class: 'sub' }, `права: ${LEVEL_TXT[r.level]}`), h('span', { class: 'grow' }), (r.level !== 'admin' || workspace.role === 'owner') ? h('button', { class: 'icon-btn', 'aria-label': 'Удалить роль', onclick: async () => { try { await api.del(`/api/roles/${r.id}`); roles.splice(roles.indexOf(r), 1); paintList(); cacheClear(); } catch (e) { toast(e.message); } } }, '✕') : null)),
+      );
+      paintList();
+      const add = async () => {
+        const name = nameIn.value.trim();
+        if (!name) return toast('Введи название роли');
+        try {
+          const { role } = await api.post(`/api/workspaces/${id}/roles`, { name, color, level: levelSel.value });
+          roles.push(role); nameIn.value = ''; paintList(); cacheClear();
+        } catch (e) { toast(e.message); }
+      };
+      nameIn.addEventListener('keydown', (e) => e.key === 'Enter' && add());
+      overlay.append(h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Роли' },
+        h('div', { class: 'head' }, h('h1', { style: 'font-size:18px;flex:1;margin:0' }, 'Роли участников'), h('button', { class: 'icon-btn', onclick: close, 'aria-label': 'Закрыть' }, '✕')),
+        h('p', { class: 'sub', style: 'margin:0 0 12px' }, 'Свои роли работают как метки: название и цвет, а доступ задаёт выбранный уровень. Назначить роль можно, нажав на участника.'),
+        list,
+        h('h2', { style: 'margin:18px 0 8px' }, 'Новая роль'),
+        h('div', { class: 'two' }, nameIn, levelSel),
+        h('div', { class: 'row', style: 'margin-top:10px;justify-content:space-between' }, sw, h('button', { class: 'btn small', onclick: add }, 'Создать роль'))));
+      document.body.append(overlay);
+    }
 
     const inviteLink = `${location.origin}${PANEL}#/join/${workspace.invite_code}`;
     const copyLink = async () => {
@@ -1850,8 +1919,9 @@
       kindBox,
       h('div', { class: 'row', style: 'margin-top:10px' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Добавить проект')),
       h('div', { class: 'spacer' }),
-      h('h2', null, 'Участники'),
-      h('div', { class: 'people' }, members.map((m) => h('span', { class: 'chip' }, avatar(m.name), m.name))),
+      h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:12px' }, h('h2', { style: 'margin:0' }, 'Участники'), isAdmin(workspace.role) ? h('button', { class: 'btn ghost small', onclick: openRoles }, 'Роли') : null),
+      h('div', { class: 'people' }, members.map(memberChip)),
+      workspace.role !== 'owner' ? h('div', { style: 'margin-top:12px' }, h('button', { class: 'btn ghost small', onclick: () => leaveWs() }, 'Выйти из пространства')) : null,
       h('div', { class: 'spacer' }),
       h(
         'div',
@@ -2391,7 +2461,7 @@
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => (e.preventDefault(), drop.classList.remove('over'))));
     drop.addEventListener('drop', (e) => upload([...e.dataTransfer.files]));
 
-    api.get(`/api/workspaces/${id}`).then((r) => ((canDelete = r.workspace.role === 'owner'), paint())).catch(() => {});
+    api.get(`/api/workspaces/${id}`).then((r) => ((canDelete = r.workspace.role === 'owner' || r.workspace.role === 'admin'), paint())).catch(() => {});
     load();
     return h('div', null, drop, usage, h('div', { class: 'spacer', style: 'height:12px' }), listEl);
   }
@@ -3456,8 +3526,8 @@
     more.addEventListener('click', () =>
       openMenu(more, [
         { label: 'Переименовать проект', onClick: () => titleEl.click() },
-        { label: S.project.share_token ? 'Публичная ссылка: включена' : 'Поделиться ссылкой', disabled: S.project.role !== 'owner', onClick: openShare },
-        { label: 'Удалить проект', danger: true, disabled: S.project.role !== 'owner', onClick: deleteProject },
+        { label: S.project.share_token ? 'Публичная ссылка: включена' : 'Поделиться ссылкой', disabled: !isAdmin(S.project.role), onClick: openShare },
+        { label: 'Удалить проект', danger: true, disabled: !isAdmin(S.project.role), onClick: deleteProject },
       ]),
     );
     function openShare() {
@@ -3559,7 +3629,7 @@
     const toolbarEl = h('div', { class: 'toolbar' }, search, assigneeFilter, labelFilter, prioFilter, lateToggle, resetBtn);
     render(
       topbar([{ label: 'Пространства', href: '#/' }, { label: S.project.workspace_name || 'Пространство', href: `#/w/${S.project.workspace_id}` }, { label: S.project.name }]),
-      h('div', { class: 'project-head' }, titleEl, more, h('span', { class: 'grow' }), viewTabs, S.project.role === 'owner' ? h('button', { class: 'btn danger small del-project', onclick: deleteProject }, 'Удалить проект') : null),
+      h('div', { class: 'project-head' }, titleEl, more, h('span', { class: 'grow' }), viewTabs, isAdmin(S.project.role) ? h('button', { class: 'btn danger small del-project', onclick: deleteProject }, 'Удалить проект') : null),
       toolbarEl,
       content,
     );

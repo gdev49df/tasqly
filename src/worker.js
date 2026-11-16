@@ -124,6 +124,37 @@ async function createSession(env, userId) {
   return { token, cookie: sessionCookie(token, maxAge) };
 }
 
+// уровни доступа: owner > admin > member > viewer (наблюдатель только смотрит и комментирует)
+const isAdminRole = (role) => role === 'owner' || role === 'admin';
+const DEFAULT_ROLES = {
+  owner: { name: 'Владелец', color: '#1c1c21' },
+  admin: { name: 'Администратор', color: '#3b5bdb' },
+  member: { name: 'Участник', color: '#2f9e44' },
+  viewer: { name: 'Наблюдатель', color: '#868e96' },
+};
+// записи, доступные и наблюдателю: комментарии, чат, AI-подсказки
+const VIEWER_OK = new Set(['/api/tasks/:id/comments', '/api/workspaces/:id/messages', '/api/workspaces/:id/ai/chat', '/api/workspaces/:id/ai/transcribe', '/api/workspaces/:id/ai/tasks', '/api/tasks/:id/ai/subtasks']);
+// в каком пространстве выполняется запись (по id в адресе)
+async function routeWorkspace(env, pattern, params) {
+  const first = /^\/api\/(\w+)\/:id/.exec(pattern);
+  if (!first || !params.id) return null;
+  const q = {
+    workspaces: ['SELECT ? AS w', 'id'],
+    projects: ['SELECT workspace_id AS w FROM projects WHERE id = ?'],
+    tasks: ['SELECT p.workspace_id AS w FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?'],
+    columns: ['SELECT p.workspace_id AS w FROM columns c JOIN projects p ON p.id = c.project_id WHERE c.id = ?'],
+    checklist: ['SELECT p.workspace_id AS w FROM checklist_items i JOIN tasks t ON t.id = i.task_id JOIN projects p ON p.id = t.project_id WHERE i.id = ?'],
+    labels: ['SELECT workspace_id AS w FROM labels WHERE id = ?'],
+    notes: ['SELECT workspace_id AS w FROM notes WHERE id = ?'],
+    files: ['SELECT workspace_id AS w FROM files WHERE id = ?'],
+    roles: ['SELECT workspace_id AS w FROM workspace_roles WHERE id = ?'],
+    time: ['SELECT p.workspace_id AS w FROM time_entries te JOIN tasks t ON t.id = te.task_id JOIN projects p ON p.id = t.project_id WHERE te.id = ?'],
+  }[first[1]];
+  if (!q) return null;
+  const row = await env.DB.prepare(q[0]).bind(params.id).first();
+  return row ? row.w : null;
+}
+
 async function requireMember(env, workspaceId, userId) {
   const row = await env.DB.prepare('SELECT role FROM members WHERE workspace_id = ? AND user_id = ?')
     .bind(workspaceId, userId)
@@ -335,7 +366,7 @@ async function nextPosition(env, table, column, value) {
 const routes = [];
 const route = (method, pattern, handler, { auth = true } = {}) => {
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$');
-  routes.push({ method, re, handler, auth });
+  routes.push({ method, re, handler, auth, pattern });
 };
 
 // авторизация
@@ -599,9 +630,9 @@ route('DELETE', '/api/workspaces/:id', async ({ env, user, params }) => {
 route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
   const role = await requireMember(env, params.id, user.id);
   const ws = await env.DB.prepare('SELECT id, name, invite_code FROM workspaces WHERE id = ?').bind(params.id).first();
-  const [members, projects, labels] = await Promise.all([
+  const [members, projects, labels, roles] = await Promise.all([
     env.DB.prepare(
-      `SELECT u.id, u.name, u.email, m.role FROM members m JOIN users u ON u.id = m.user_id
+      `SELECT u.id, u.name, u.email, m.role, m.role_id FROM members m JOIN users u ON u.id = m.user_id
        WHERE m.workspace_id = ? ORDER BY m.joined_at`,
     )
       .bind(params.id)
@@ -615,8 +646,97 @@ route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
       .bind(params.id)
       .all(),
     env.DB.prepare('SELECT id, name, color FROM labels WHERE workspace_id = ? ORDER BY created_at').bind(params.id).all(),
+    env.DB.prepare('SELECT id, name, color, level FROM workspace_roles WHERE workspace_id = ? ORDER BY created_at').bind(params.id).all(),
   ]);
-  return json({ workspace: { ...ws, role }, members: members.results, projects: projects.results, labels: labels.results });
+  const customRoles = new Map(roles.results.map((r) => [r.id, r]));
+  const shaped = members.results.map((m) => {
+    const c = m.role_id && customRoles.get(m.role_id);
+    const d = DEFAULT_ROLES[m.role] || DEFAULT_ROLES.member;
+    return { id: m.id, name: m.name, email: m.email, role: m.role, role_id: c ? c.id : null, role_name: c ? c.name : d.name, role_color: c ? c.color : d.color };
+  });
+  return json({ workspace: { ...ws, role }, members: shaped, projects: projects.results, labels: labels.results, roles: roles.results, default_roles: DEFAULT_ROLES });
+});
+
+// роли и участники
+const LEVELS = ['admin', 'member', 'viewer'];
+async function requireAdmin(env, wsId, userId) {
+  const role = await requireMember(env, wsId, userId);
+  if (!isAdminRole(role)) fail(403, 'это доступно владельцу и администратору');
+  return role;
+}
+
+route('POST', '/api/workspaces/:id/roles', async ({ env, user, params, body }) => {
+  const actor = await requireAdmin(env, params.id, user.id);
+  const name = cleanString(body.name, 'название роли', { max: 30 });
+  const color = validateColor(body.color);
+  const level = LEVELS.includes(body.level) ? body.level : 'member';
+  if (level === 'admin' && actor !== 'owner') fail(403, 'роль с правами администратора создаёт только владелец');
+  const cnt = await env.DB.prepare('SELECT COUNT(*) AS c FROM workspace_roles WHERE workspace_id = ?').bind(params.id).first();
+  if (cnt.c >= 12) fail(429, 'достигнут лимит: не больше 12 своих ролей');
+  const id = newId();
+  await env.DB.prepare('INSERT INTO workspace_roles (id, workspace_id, name, color, level, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, params.id, name, color, level, now()).run();
+  return json({ role: { id, name, color, level } }, 201);
+});
+
+route('PATCH', '/api/roles/:id', async ({ env, user, params, body }) => {
+  const role = await env.DB.prepare('SELECT * FROM workspace_roles WHERE id = ?').bind(params.id).first();
+  if (!role) fail(404, 'роль не найдена');
+  const actor = await requireAdmin(env, role.workspace_id, user.id);
+  const name = body.name === undefined ? role.name : cleanString(body.name, 'название роли', { max: 30 });
+  const color = body.color === undefined ? role.color : validateColor(body.color);
+  const level = body.level === undefined ? role.level : LEVELS.includes(body.level) ? body.level : fail(400, 'неизвестный уровень');
+  if ((level === 'admin' || role.level === 'admin') && level !== role.level && actor !== 'owner') fail(403, 'уровень администратора меняет только владелец');
+  await env.DB.batch([
+    env.DB.prepare('UPDATE workspace_roles SET name = ?, color = ?, level = ? WHERE id = ?').bind(name, color, level, params.id),
+    env.DB.prepare("UPDATE members SET role = ? WHERE role_id = ? AND role != 'owner'").bind(level, params.id),
+  ]);
+  return json({ role: { id: params.id, name, color, level } });
+});
+
+route('DELETE', '/api/roles/:id', async ({ env, user, params }) => {
+  const role = await env.DB.prepare('SELECT * FROM workspace_roles WHERE id = ?').bind(params.id).first();
+  if (!role) fail(404, 'роль не найдена');
+  const actor = await requireAdmin(env, role.workspace_id, user.id);
+  if (role.level === 'admin' && actor !== 'owner') fail(403, 'роль администратора удаляет только владелец');
+  await env.DB.prepare('DELETE FROM workspace_roles WHERE id = ?').bind(params.id).run();
+  return json({ ok: true });
+});
+
+// сменить роль участника: body.level (admin|member|viewer) или body.role_id (своя роль)
+route('PATCH', '/api/workspaces/:id/members/:uid', async ({ env, user, params, body }) => {
+  const actor = await requireAdmin(env, params.id, user.id);
+  const target = await env.DB.prepare('SELECT role FROM members WHERE workspace_id = ? AND user_id = ?').bind(params.id, params.uid).first();
+  if (!target) fail(404, 'участник не найден');
+  if (target.role === 'owner') fail(403, 'роль владельца изменить нельзя');
+  if (params.uid === user.id) fail(400, 'свою роль менять нельзя');
+  if (target.role === 'admin' && actor !== 'owner') fail(403, 'роль администратора меняет только владелец');
+  let level;
+  let roleId = null;
+  if (body.role_id) {
+    const r = await env.DB.prepare('SELECT id, level FROM workspace_roles WHERE id = ? AND workspace_id = ?').bind(body.role_id, params.id).first();
+    if (!r) fail(404, 'роль не найдена');
+    level = r.level;
+    roleId = r.id;
+  } else {
+    level = LEVELS.includes(body.level) ? body.level : fail(400, 'неизвестная роль');
+  }
+  if (level === 'admin' && actor !== 'owner') fail(403, 'администратора назначает только владелец');
+  await env.DB.prepare('UPDATE members SET role = ?, role_id = ? WHERE workspace_id = ? AND user_id = ?').bind(level, roleId, params.id, params.uid).run();
+  return json({ ok: true, level, role_id: roleId });
+});
+
+// убрать участника или выйти самому
+route('DELETE', '/api/workspaces/:id/members/:uid', async ({ env, user, params }) => {
+  const actor = await requireMember(env, params.id, user.id);
+  const target = await env.DB.prepare('SELECT role FROM members WHERE workspace_id = ? AND user_id = ?').bind(params.id, params.uid).first();
+  if (!target) fail(404, 'участник не найден');
+  if (target.role === 'owner') fail(403, 'владелец не может выйти: удали пространство или передай его');
+  if (params.uid !== user.id) {
+    if (!isAdminRole(actor)) fail(403, 'убирать участников может владелец или администратор');
+    if (target.role === 'admin' && actor !== 'owner') fail(403, 'администратора убирает только владелец');
+  }
+  await env.DB.prepare('DELETE FROM members WHERE workspace_id = ? AND user_id = ?').bind(params.id, params.uid).run();
+  return json({ ok: true });
 });
 
 route('POST', '/api/workspaces/:id/projects', async ({ env, user, params, body }) => {
@@ -682,7 +802,7 @@ route('GET', '/api/projects/:id', async ({ env, user, params }) => {
     env.DB.prepare('SELECT id, name, color FROM labels WHERE workspace_id = ? ORDER BY created_at').bind(project.workspace_id).all(),
   ]);
   return json({
-    project: { id: project.id, name: project.name, kind: project.kind, workspace_id: project.workspace_id, workspace_name: project.workspace_name, role: project.role, share_token: project.role === 'owner' ? project.share_token || null : undefined },
+    project: { id: project.id, name: project.name, kind: project.kind, workspace_id: project.workspace_id, workspace_name: project.workspace_name, role: project.role, share_token: isAdminRole(project.role) ? project.share_token || null : undefined },
     columns: columns.results.map((c) => ({ ...c, is_done: !!c.is_done })),
     tasks: tasks.results.map(shapeTask),
     members: members.results,
@@ -699,7 +819,7 @@ route('PATCH', '/api/projects/:id', async ({ env, user, params, body }) => {
 
 route('DELETE', '/api/projects/:id', async ({ env, user, params }) => {
   const project = await projectContext(env, params.id, user.id);
-  if (project.role !== 'owner') fail(403, 'удалять проекты может только владелец');
+  if (!isAdminRole(project.role)) fail(403, 'удалять проекты может владелец или администратор');
   await env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(params.id).run();
   return json({ ok: true });
 });
@@ -707,7 +827,7 @@ route('DELETE', '/api/projects/:id', async ({ env, user, params }) => {
 // публичная ссылка на проект: только просмотр, включает и выключает владелец
 route('POST', '/api/projects/:id/share', async ({ env, user, params }) => {
   const project = await projectContext(env, params.id, user.id);
-  if (project.role !== 'owner') fail(403, 'ссылкой делится только владелец');
+  if (!isAdminRole(project.role)) fail(403, 'ссылкой делится владелец или администратор');
   const token = project.share_token || randomHex(16);
   await env.DB.prepare('UPDATE projects SET share_token = ? WHERE id = ?').bind(token, params.id).run();
   return json({ share_token: token });
@@ -715,7 +835,7 @@ route('POST', '/api/projects/:id/share', async ({ env, user, params }) => {
 
 route('DELETE', '/api/projects/:id/share', async ({ env, user, params }) => {
   const project = await projectContext(env, params.id, user.id);
-  if (project.role !== 'owner') fail(403, 'ссылкой делится только владелец');
+  if (!isAdminRole(project.role)) fail(403, 'ссылкой делится владелец или администратор');
   await env.DB.prepare('UPDATE projects SET share_token = NULL WHERE id = ?').bind(params.id).run();
   return json({ ok: true });
 });
@@ -1305,7 +1425,7 @@ route('GET', '/api/files/:id/download', async ({ env, user, params }) => {
 
 route('DELETE', '/api/files/:id', async ({ env, user, params }) => {
   const file = await fileContext(env, params.id, user.id);
-  if (file.uploaded_by !== user.id && file.role !== 'owner') fail(403, 'удалить файл может его автор или владелец');
+  if (file.uploaded_by !== user.id && !isAdminRole(file.role)) fail(403, 'удалить файл может его автор, владелец или администратор');
   await env.DB.prepare('DELETE FROM files WHERE id = ?').bind(params.id).run();
   return json({ ok: true });
 });
@@ -1562,6 +1682,14 @@ const handle = async (req, env) => {
       if (match.r.auth) {
         user = await currentUser(req, env);
         if (!user) fail(401, 'нужно войти');
+        // наблюдатель не может ничего менять, кроме комментариев и чата
+        if (method !== 'GET' && method !== 'HEAD' && !VIEWER_OK.has(match.r.pattern)) {
+          const wsId = await routeWorkspace(env, match.r.pattern, match.params);
+          if (wsId) {
+            const m = await env.DB.prepare('SELECT role FROM members WHERE workspace_id = ? AND user_id = ?').bind(wsId, user.id).first();
+            if (m && m.role === 'viewer') fail(403, 'у тебя роль «Наблюдатель»: можно смотреть и комментировать, менять нельзя');
+          }
+        }
       }
       return await match.r.handler({ req, env, params: match.params, body, user });
     } catch (e) {
