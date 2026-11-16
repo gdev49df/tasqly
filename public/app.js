@@ -1750,7 +1750,7 @@
     setAiContext(S.project.workspace_id, id, `проект «${S.project.name}»`);
 
     const F = { q: '', assignee: '', label: '', priority: '', late: false };
-    let view = ['overview', 'board', 'list', 'calendar'].includes(viewStore.get()) ? viewStore.get() : 'board';
+    let view = 'overview'; // проект всегда открывается на обзоре
     const now = new Date();
     const cal = { y: now.getFullYear(), m: now.getMonth() };
     const calExpanded = new Set();
