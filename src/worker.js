@@ -126,7 +126,8 @@ async function requireMember(env, workspaceId, userId) {
 
 async function projectContext(env, projectId, userId) {
   const project = await env.DB.prepare(
-    `SELECT p.id, p.name, p.kind, p.workspace_id, m.role FROM projects p
+    `SELECT p.id, p.name, p.kind, p.workspace_id, w.name AS workspace_name, m.role FROM projects p
+     JOIN workspaces w ON w.id = p.workspace_id
      JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?
      WHERE p.id = ?`,
   )
@@ -361,6 +362,23 @@ route(
 
 route('GET', '/api/me', async ({ user }) => json({ user }));
 
+// смена пароля: нужен текущий пароль; остальные сессии завершаются
+route('POST', '/api/auth/password', async ({ env, req, user, body }) => {
+  const oldPassword = cleanString(body.old_password, 'текущий пароль', { min: 1, max: 200 });
+  const newPassword = cleanString(body.new_password, 'новый пароль', { min: 8, max: 200 });
+  const row = await env.DB.prepare('SELECT pass_hash, pass_salt FROM users WHERE id = ?').bind(user.id).first();
+  const { hash: oldHash } = await hashPassword(oldPassword, row.pass_salt);
+  if (!safeEqual(oldHash, row.pass_hash)) fail(403, 'текущий пароль неверный');
+  if (oldPassword === newPassword) fail(400, 'новый пароль совпадает со старым');
+  const { hash, salt } = await hashPassword(newPassword);
+  const keep = await sha256(getToken(req));
+  await env.DB.batch([
+    env.DB.prepare('UPDATE users SET pass_hash = ?, pass_salt = ? WHERE id = ?').bind(hash, salt, user.id),
+    env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').bind(user.id, keep),
+  ]);
+  return json({ ok: true });
+});
+
 // входящие: мои незавершённые задачи и свежие комментарии других людей к моим задачам
 route('GET', '/api/inbox', async ({ env, user }) => {
   const tasks = await env.DB.prepare(
@@ -525,7 +543,7 @@ route('GET', '/api/projects/:id', async ({ env, user, params }) => {
     env.DB.prepare('SELECT id, name, color FROM labels WHERE workspace_id = ? ORDER BY created_at').bind(project.workspace_id).all(),
   ]);
   return json({
-    project: { id: project.id, name: project.name, kind: project.kind, workspace_id: project.workspace_id, role: project.role },
+    project: { id: project.id, name: project.name, kind: project.kind, workspace_id: project.workspace_id, workspace_name: project.workspace_name, role: project.role },
     columns: columns.results.map((c) => ({ ...c, is_done: !!c.is_done })),
     tasks: tasks.results.map(shapeTask),
     members: members.results,

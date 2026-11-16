@@ -398,6 +398,25 @@ r = await alice('POST', `/api/workspaces/${wsId}/ai/chat`, { message: 'напи�
 assert.match(r.data.reply, /только с задачами и проектами/);
 ok('ai: чат, задачи из текста, подзадачи, права, код в ответе блокируется');
 
+// ---------- смена пароля ----------
+
+r = await outsider('POST', '/api/auth/password', { old_password: 'wrong-pass', new_password: 'newpassword1' });
+assert.equal(r.status, 403);
+r = await outsider('POST', '/api/auth/password', { old_password: 'password123', new_password: 'short' });
+assert.equal(r.status, 400);
+r = await outsider('POST', '/api/auth/password', { old_password: 'password123', new_password: 'password123' });
+assert.equal(r.status, 400);
+const evePc = client();
+await evePc('POST', '/api/auth/login', { email: `eve${run}@test.dev`, password: 'password123' });
+assert.equal((await evePc('GET', '/api/me')).status, 200);
+r = await outsider('POST', '/api/auth/password', { old_password: 'password123', new_password: 'newpassword1' });
+assert.equal(r.status, 200);
+assert.equal((await outsider('GET', '/api/me')).status, 200);
+assert.equal((await evePc('GET', '/api/me')).status, 401);
+assert.equal((await client()('POST', '/api/auth/login', { email: `eve${run}@test.dev`, password: 'password123' })).status, 401);
+assert.equal((await client()('POST', '/api/auth/login', { email: `eve${run}@test.dev`, password: 'newpassword1' })).status, 200);
+ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

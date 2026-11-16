@@ -345,6 +345,80 @@
     aiDock = aiLabelEl = aiChatObj = null;
   }
 
+  // ---------- пароль: показать/скрыть, смена пароля ----------
+
+  const EYE = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.8 10S5 4.5 10 4.5 18.2 10 18.2 10 15 15.5 10 15.5 1.8 10 1.8 10z"/><circle cx="10" cy="10" r="2.4"/></svg>';
+  const EYE_OFF = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l14 14M8.2 4.8A8 8 0 0 1 10 4.5c5 0 8.2 5.5 8.2 5.5a14 14 0 0 1-2.6 3.2M12.1 12.1A2.4 2.4 0 0 1 7.9 7.9M5 6.2C3 7.7 1.8 10 1.8 10S5 15.5 10 15.5c1.1 0 2.1-.2 3-.6"/></svg>';
+
+  function passwordField(attrs = {}) {
+    const input = h('input', { type: 'password', ...attrs });
+    const btn = h('button', { type: 'button', class: 'eye', title: 'Показать пароль', 'aria-label': 'Показать пароль', 'aria-pressed': 'false' });
+    btn.innerHTML = EYE;
+    btn.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.innerHTML = show ? EYE_OFF : EYE;
+      btn.setAttribute('aria-pressed', String(show));
+      const label = show ? 'Скрыть пароль' : 'Показать пароль';
+      btn.setAttribute('aria-label', label);
+      btn.title = label;
+      input.focus();
+    });
+    return h('div', { class: 'pw' }, input, btn);
+  }
+
+  // плавное закрытие окон
+  function closeOverlay(overlay) {
+    if (!overlay.isConnected || overlay.classList.contains('closing')) return;
+    overlay.classList.add('closing');
+    setTimeout(() => overlay.remove(), 190);
+  }
+
+  function openPasswordModal() {
+    const oldPw = passwordField({ name: 'old', autocomplete: 'current-password', 'aria-label': 'Текущий пароль' });
+    const newPw = passwordField({ name: 'new', autocomplete: 'new-password', 'aria-label': 'Новый пароль' });
+    const repPw = passwordField({ name: 'rep', autocomplete: 'new-password', 'aria-label': 'Повтори новый пароль' });
+    const error = h('div', { class: 'error' });
+    const overlay = h('div', { class: 'overlay' });
+    const close = () => closeOverlay(overlay);
+    overlay.addEventListener('tq-close', close);
+    overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+    const val = (box) => box.querySelector('input').value;
+    const submit = h('button', { class: 'btn', type: 'submit' }, 'Сменить пароль');
+    const form = h(
+      'form',
+      { novalidate: true, class: 'modal narrow', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Смена пароля' },
+      h('div', { class: 'head' }, h('h1', { style: 'font-size:18px;flex:1;margin:0' }, 'Смена пароля'), h('button', { type: 'button', class: 'icon-btn', onclick: close, 'aria-label': 'Закрыть' }, '✕')),
+      h('label', { class: 'field' }, 'Текущий пароль'),
+      oldPw,
+      h('label', { class: 'field' }, 'Новый пароль'),
+      newPw,
+      h('div', { class: 'sub', style: 'margin:6px 0 0;font-size:12px' }, 'Минимум 8 символов. Остальные устройства выйдут из аккаунта.'),
+      h('label', { class: 'field' }, 'Повтори новый пароль'),
+      repPw,
+      error,
+      h('div', { class: 'modal-actions' }, h('button', { type: 'button', class: 'btn ghost', onclick: close }, 'Отмена'), submit),
+    );
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      if (val(newPw).length < 8) return (error.textContent = 'Новый пароль: минимум 8 символов');
+      if (val(newPw) !== val(repPw)) return (error.textContent = 'Пароли не совпадают');
+      submit.disabled = true;
+      try {
+        await api.post('/api/auth/password', { old_password: val(oldPw), new_password: val(newPw) });
+        close();
+        toast('Пароль изменён');
+      } catch (err) {
+        error.textContent = err.message;
+        submit.disabled = false;
+      }
+    });
+    overlay.append(form);
+    document.body.append(overlay);
+    oldPw.querySelector('input').focus();
+  }
+
   // ---------- левая панель ----------
 
   function openDrawer() {
@@ -483,6 +557,8 @@
         },
       },
       '-',
+      { label: 'Сменить пароль', onClick: openPasswordModal },
+      '-',
       { label: 'Выйти', danger: true, onClick: logout },
     ]);
     if (menuEl) menuEl.classList.add('right');
@@ -536,25 +612,106 @@
 
   // ---------- вход ----------
 
-  function viewAuth() {
-    document.title = 'tasqly';
+  // ---------- лендинг: что такое tasqly (для тех, кто не вошёл) ----------
+
+  function viewLanding() {
+    document.title = 'tasqly — задачи, время и команда в одном пространстве';
     destroyDock();
-    let mode = 'login';
+    const to = (id) => () => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    };
+    const logo = h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly'));
+
+    // демо-доска: одна карточка сама переезжает в «Готово»
+    const demoCard = (title, extra = [], cls = '') => h('div', { class: `demo-card ${cls}` }, h('div', { class: 'demo-title' }, title), h('div', { class: 'demo-meta' }, extra));
+    const demo = h(
+      'div',
+      { class: 'demo', 'aria-hidden': 'true' },
+      h('div', { class: 'demo-bar' }, h('i'), h('i'), h('i'), h('span', null, 'Запуск сайта')),
+      h(
+        'div',
+        { class: 'demo-cols' },
+        h('div', { class: 'demo-col' }, h('div', { class: 'demo-head' }, 'К выполнению', h('b', null, '2')), demoCard('Написать тексты', [h('span', { class: 'pill', style: '--c:#8e4ec6' }, 'контент'), h('span', null, '19 нояб.')]), demoCard('Подключить оплату', [h('span', { class: 'pill', style: '--c:#e5484d' }, 'срочно'), h('span', null, '⏱ 1 ч 20 мин')])),
+        h('div', { class: 'demo-col' }, h('div', { class: 'demo-head' }, 'В работе', h('b', null, '1')), demoCard('Нарисовать главную', [h('span', { class: 'pill', style: '--c:#3e63dd' }, 'дизайн'), h('span', null, '☑ 2/3')], 'travel')),
+        h('div', { class: 'demo-col' }, h('div', { class: 'demo-head' }, h('span', null, 'Готово ', h('em', null, '✓')), h('b', null, '1')), demoCard('Бриф клиента', [h('span', null, '14 нояб.')], 'is-done')),
+      ),
+      h('div', { class: 'demo-ai' }, h('span', { class: 'avatar ai-avatar' }, 'AI'), h('span', null, 'Просрочена одна задача: «Подключить оплату». Исполнитель не назначен.')),
+    );
+
+    const features = [
+      ['Три типа проектов', 'Базовый, продвинутый и IT: каждый со своими колонками под процесс, от «К выполнению» до «Code review».'],
+      ['Доска, список, календарь', 'Одни и те же задачи в трёх видах. Перетаскивай карточки и даты, ищи и фильтруй по людям, меткам, срокам.'],
+      ['Учёт времени', 'Таймер в задаче и ручной ввод. Видно, сколько ушло, и сравнение с оценкой. Отчёт по людям и проектам.'],
+      ['Обзор проекта', 'Процент выполнения, просрочки, нагрузка на команду и ближайшие дедлайны на одном экране.'],
+      ['Заметки', 'Общие заметки пространства: договорённости, идеи, детали. Сохраняются сами.'],
+      ['Чат команды', 'Быстрые обсуждения рядом с задачами, без отдельного мессенджера.'],
+      ['Диск', 'Файлы пространства в одном месте: загрузил, и вся команда скачала.'],
+      ['AI tasqly', 'Подскажет, что горит, соберёт план на день, превратит текст встречи в задачи и разобьёт задачу на шаги.'],
+    ];
+
+    const kinds = [
+      ['Базовый', 'Для небольших дел и личных проектов', ['К выполнению', 'В работе', 'Готово']],
+      ['Продвинутый', 'Для команд, которым нужна проверка и оценка времени', ['Бэклог', 'К выполнению', 'В работе', 'На проверке', 'Готово']],
+      ['IT', 'Для разработки: спринты, ревью, баги и фичи', ['Бэклог', 'Спринт', 'В работе', 'Code review', 'Тестирование', 'Готово']],
+    ];
+
+    const steps = [
+      ['Создай пространство', 'Это место для твоей команды. Пригласи людей кодом из шести символов.'],
+      ['Заведи проект', 'Выбери тип под свой процесс. Колонки можно менять как угодно.'],
+      ['Веди работу', 'Ставь задачи, включай таймер, пиши в чат и спрашивай AI, что горит.'],
+    ];
+
+    render(
+      h(
+        'div',
+        { class: 'land' },
+        h('header', { class: 'land-nav' }, logo, h('nav', { class: 'land-links' }, h('button', { onclick: to('features') }, 'Возможности'), h('button', { onclick: to('kinds') }, 'Проекты'), h('button', { onclick: to('steps') }, 'Как начать')), h('span', { class: 'grow' }), h('a', { class: 'btn ghost small', href: '#/login' }, 'Войти'), h('a', { class: 'btn small', href: '#/register' }, 'Начать')),
+        h(
+          'section',
+          { class: 'hero' },
+          h(
+            'div',
+            { class: 'hero-copy' },
+            h('h1', null, 'Вся работа команды на одной доске'),
+            h('p', null, 'tasqly собирает задачи, учёт времени, заметки, чат и файлы в одном пространстве. AI подскажет, что горит, и разобьёт большую задачу на шаги.'),
+            h('div', { class: 'hero-cta' }, h('a', { class: 'btn big', href: '#/register' }, 'Создать пространство'), h('a', { class: 'btn ghost big', href: '#/login' }, 'Войти')),
+            h('div', { class: 'hero-note' }, 'Регистрация за минуту. Карта не нужна.'),
+          ),
+          demo,
+        ),
+        h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('dl', { class: 'feat' }, features.map(([t, d]) => h('div', null, h('dt', null, t), h('dd', null, d))))),
+        h(
+          'section',
+          { class: 'land-sec', id: 'kinds' },
+          h('h2', null, 'Проект под твой процесс'),
+          h('div', { class: 'kinds-list' }, kinds.map(([name, hint, cols]) => h('div', { class: 'kind-row' }, h('div', { class: 'kind-info' }, h('b', null, name), h('span', null, hint)), h('div', { class: 'kind-cols' }, cols.map((c, i) => h('span', { class: `kcol${i === cols.length - 1 ? ' done' : ''}` }, c)))))),
+        ),
+        h('section', { class: 'land-sec', id: 'steps' }, h('h2', null, 'Как начать'), h('ol', { class: 'steps' }, steps.map(([t, d], i) => h('li', null, h('span', { class: 'step-n' }, i + 1), h('div', null, h('b', null, t), h('span', null, d)))))),
+        h('section', { class: 'land-cta' }, h('h2', null, 'Собери команду в одном месте'), h('a', { class: 'btn big', href: '#/register' }, 'Создать пространство')),
+      ),
+    );
+  }
+
+  function viewAuth(initialMode = 'login') {
+    document.title = initialMode === 'register' ? 'Регистрация · tasqly' : 'Вход · tasqly';
+    destroyDock();
+    let mode = initialMode;
     const error = h('div', { class: 'error' });
     const form = h('form', { novalidate: true });
     const tabs = h('div', { class: 'seg' });
 
     function paint() {
       tabs.replaceChildren(
-        h('button', { type: 'button', class: mode === 'login' ? 'active' : '', onclick: () => ((mode = 'login'), paint()) }, 'Вход'),
-        h('button', { type: 'button', class: mode === 'register' ? 'active' : '', onclick: () => ((mode = 'register'), paint()) }, 'Регистрация'),
+        h('button', { type: 'button', class: mode === 'login' ? 'active' : '', onclick: () => ((mode = 'login'), history.replaceState(null, '', '#/login'), paint()) }, 'Вход'),
+        h('button', { type: 'button', class: mode === 'register' ? 'active' : '', onclick: () => ((mode = 'register'), history.replaceState(null, '', '#/register'), paint()) }, 'Регистрация'),
       );
       form.replaceChildren(
         ...(mode === 'register' ? [h('label', { class: 'field' }, 'Имя'), h('input', { type: 'text', name: 'name', autocomplete: 'name', maxlength: 60 })] : []),
         h('label', { class: 'field' }, 'Email'),
         h('input', { type: 'email', name: 'email', autocomplete: 'email' }),
         h('label', { class: 'field' }, 'Пароль'),
-        h('input', { type: 'password', name: 'password', autocomplete: mode === 'login' ? 'current-password' : 'new-password' }),
+        passwordField({ name: 'password', autocomplete: mode === 'login' ? 'current-password' : 'new-password', 'aria-label': 'Пароль' }),
         ...(mode === 'register' ? [h('div', { class: 'sub', style: 'margin:6px 0 0;font-size:12px' }, 'Минимум 8 символов')] : []),
         error,
         h('button', { class: 'btn', style: 'width:100%;margin-top:6px', type: 'submit' }, mode === 'login' ? 'Войти' : 'Создать аккаунт'),
@@ -570,7 +727,8 @@
       try {
         const res = await api.post(mode === 'login' ? '/api/auth/login' : '/api/auth/register', data);
         state.user = res.user;
-        route();
+        if (location.hash === '#/') route();
+        else location.hash = '#/';
       } catch (err) {
         error.textContent = err.message;
         btn.disabled = false;
@@ -583,8 +741,9 @@
         'div',
         { class: 'auth' },
         h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly')),
-        h('div', { class: 'tag' }, 'Задачи и проекты для команд'),
+        h('div', { class: 'tag' }, mode === 'register' ? 'Создай аккаунт и первое пространство' : 'Войди в свой кабинет'),
         h('div', { class: 'card' }, tabs, form),
+        h('a', { class: 'auth-back', href: '#/' }, '← О сервисе'),
       ),
     );
   }
@@ -1205,7 +1364,7 @@
     setAiContext(S.project.workspace_id, id, `проект «${S.project.name}»`);
 
     const F = { q: '', assignee: '', label: '', priority: '', late: false };
-    let view = ['board', 'list', 'calendar'].includes(viewStore.get()) ? viewStore.get() : 'board';
+    let view = ['overview', 'board', 'list', 'calendar'].includes(viewStore.get()) ? viewStore.get() : 'board';
     const now = new Date();
     const cal = { y: now.getFullYear(), m: now.getMonth() };
     const calExpanded = new Set();
@@ -1583,8 +1742,106 @@
       );
     }
 
+    // --- обзор проекта ---
+    function paintOverview() {
+      const cols = sortedCols();
+      const firstId = cols[0] && cols[0].id;
+      const total = S.tasks.length;
+      const done = S.tasks.filter(isDone);
+      const late = S.tasks.filter(isLate);
+      const open = S.tasks.filter((t) => !isDone(t));
+      const waiting = open.filter((t) => !isLate(t) && t.column_id === firstId);
+      const doing = open.filter((t) => !isLate(t) && t.column_id !== firstId);
+      const pct = total ? Math.round((done.length / total) * 100) : 0;
+      const tracked = S.tasks.reduce((n, t) => n + (t.tracked_sec || 0), 0);
+      const estimated = S.tasks.reduce((n, t) => n + (t.estimate_min || 0) * 60, 0);
+      const unassigned = open.filter((t) => !t.assignee_id).length;
+
+      const stat = (label, n, cls) => h('div', { class: `stat ${cls}` }, h('div', { class: 'stat-name' }, label), h('div', { class: 'stat-num' }, n));
+
+      // кольцо: готово, в работе, ожидает, просрочено
+      const segs = [
+        [done.length, 'var(--ok)', 'Готово'],
+        [doing.length, 'var(--accent)', 'В работе'],
+        [waiting.length, 'var(--border-strong)', 'Ожидает'],
+        [late.length, 'var(--danger)', 'Просрочено'],
+      ];
+      const R = 52;
+      const C = 2 * Math.PI * R;
+      let offset = 0;
+      const arcs = total
+        ? segs
+            .filter(([n]) => n)
+            .map(([n, color]) => {
+              const len = (n / total) * C;
+              const el = `<circle cx="70" cy="70" r="${R}" fill="none" stroke-width="16" style="stroke:${color}" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 70 70)"/>`;
+              offset += len;
+              return el;
+            })
+            .join('')
+        : '';
+      const ring = h('div', { class: 'ring' });
+      ring.innerHTML = `<svg viewBox="0 0 140 140" width="150" height="150" role="img" aria-label="Статусы задач"><circle cx="70" cy="70" r="${R}" fill="none" stroke-width="16" style="stroke:var(--hover)"/>${arcs}</svg>`;
+      ring.append(h('div', { class: 'ring-num' }, h('b', null, total), h('span', null, 'задач')));
+
+      // команда: открытые задачи по людям
+      const people = S.members.map((m) => ({ m, open: open.filter((t) => t.assignee_id === m.id).length, done: done.filter((t) => t.assignee_id === m.id).length }));
+      const maxOpen = Math.max(1, ...people.map((x) => x.open));
+
+      // ближайшие незавершённые задачи
+      const rows = [...open]
+        .sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999') || b.priority - a.priority)
+        .slice(0, 8);
+      const colName = (id) => (S.columns.find((c) => c.id === id) || {}).name || '';
+      const taskPct = (t) => (t.check_total ? Math.round((t.check_done / t.check_total) * 100) : 0);
+
+      content.replaceChildren(
+        h(
+          'div',
+          { class: 'overview' },
+          h(
+            'div',
+            { class: 'ov-top' },
+            h('div', { class: 'card' }, h('h2', null, 'Прогресс проекта'), h('div', { class: 'big' }, `${pct}%`), h('div', { class: 'progress', style: 'margin-top:8px' }, h('span', { style: `width:${pct}%` })), h('div', { class: 'mail-sub', style: 'margin-top:8px' }, `${done.length} из ${total} задач выполнено${S.project.kind && S.project.kind !== 'basic' ? ` · проект ${KINDS[S.project.kind].name.toLowerCase()}` : ''}`)),
+            h('div', { class: 'card' }, h('h2', null, 'Время'), h('div', { class: 'big' }, fmtDur(tracked)), estimated ? h('div', { class: `progress${tracked > estimated ? ' over' : ''}`, style: 'margin-top:8px' }, h('span', { style: `width:${Math.min(100, Math.round((tracked / estimated) * 100))}%` })) : null, h('div', { class: 'mail-sub', style: 'margin-top:8px' }, estimated ? `оценка: ${fmtDur(estimated)}` : 'оценка не задана')),
+            h('div', { class: 'card' }, h('h2', null, `Команда · ${S.members.length}`), h('div', { class: 'team' }, people.map((x) => h('div', { class: 'team-row' }, avatar(x.m.name), h('span', { class: 'team-name' }, x.m.name), h('div', { class: 'bar' }, h('span', { style: `width:${x.open ? Math.max(6, Math.round((x.open / maxOpen) * 100)) : 0}%` })), h('span', { class: 'bar-val' }, `${x.open}`))), h('div', { class: 'mail-sub', style: 'margin-top:6px' }, 'открытых задач у каждого'))),
+          ),
+          h('div', { class: 'stats' }, stat('В работе', doing.length, 'blue'), stat('Просрочено', late.length, 'red'), stat('Завершено', done.length, 'green'), stat('Без исполнителя', unassigned, 'gray')),
+          h(
+            'div',
+            { class: 'ov-bottom' },
+            h('div', { class: 'card' }, h('h2', null, 'Статус задач'), ring, h('div', { class: 'legend' }, segs.map(([n, color, label]) => h('span', null, h('i', { style: `background:${color}` }), `${label} ${n}`)))),
+            h(
+              'div',
+              { class: 'card flush' },
+              h('h2', { style: 'padding:14px 16px 0' }, 'Ближайшие задачи'),
+              rows.length
+                ? h(
+                    'div',
+                    { class: 'ov-table' },
+                    h('div', { class: 'ov-row head' }, h('span', null, 'Задача'), h('span', null, 'Колонка'), h('span', null, 'Чек-лист'), h('span', null, 'Срок')),
+                    rows.map((t) =>
+                      h(
+                        'button',
+                        { class: 'ov-row', onclick: () => openTask(t.id) },
+                        h('span', { class: 'ov-title' }, t.title),
+                        h('span', null, h('span', { class: 'pill', style: '--c:var(--accent)' }, colName(t.column_id))),
+                        h('span', { class: 'ov-prog' }, t.check_total ? [h('div', { class: 'bar' }, h('span', { style: `width:${taskPct(t)}%` })), h('span', { class: 'bar-val' }, `${taskPct(t)}%`)] : h('span', { class: 'mail-sub' }, '—')),
+                        h('span', { class: isLate(t) ? 'late' : 'mail-sub' }, t.due_date ? formatDate(t.due_date) : '—'),
+                      ),
+                    ),
+                  )
+                : h('div', { class: 'empty' }, total ? 'Все задачи выполнены' : 'Задач пока нет. Добавь первую на доске.'),
+            ),
+          ),
+        ),
+      );
+    }
+
     function paint() {
-      if (view === 'list') paintList();
+      toolbarEl.style.display = view === 'overview' ? 'none' : '';
+      if (view === 'overview') paintOverview();
+      else if (view === 'list') paintList();
       else if (view === 'calendar') paintCalendar();
       else paintBoard();
       syncReset();
@@ -1960,7 +2217,7 @@
         // дописанное поле сохраняется при потере фокуса
         if (overlay.contains(document.activeElement)) document.activeElement.blur();
         window.removeEventListener('tq-timer', onTimer);
-        overlay.remove();
+        closeOverlay(overlay);
       };
       overlay.addEventListener('tq-close', close);
       overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
@@ -1971,7 +2228,7 @@
           await api.del(`/api/tasks/${task.id}`);
           S.tasks = S.tasks.filter((t) => t.id !== task.id);
           paint();
-          overlay.remove();
+          closeOverlay(overlay);
         } catch (e) {
           toast(e.message);
         }
@@ -2031,6 +2288,7 @@
     const paintTabs = () =>
       viewTabs.replaceChildren(
         ...[
+          ['overview', 'Обзор'],
           ['board', 'Доска'],
           ['list', 'Список'],
           ['calendar', 'Календарь'],
@@ -2121,10 +2379,11 @@
       resetBtn.style.display = filtersOn() ? '' : 'none';
     }
 
+    const toolbarEl = h('div', { class: 'toolbar' }, search, assigneeFilter, labelFilter, prioFilter, lateToggle, resetBtn);
     render(
-      topbar([{ label: 'Пространства', href: '#/' }, { label: 'Пространство', href: `#/w/${S.project.workspace_id}` }, { label: S.project.name }]),
+      topbar([{ label: 'Пространства', href: '#/' }, { label: S.project.workspace_name || 'Пространство', href: `#/w/${S.project.workspace_id}` }, { label: S.project.name }]),
       h('div', { class: 'project-head' }, titleEl, more, h('span', { class: 'grow' }), viewTabs),
-      h('div', { class: 'toolbar' }, search, assigneeFilter, labelFilter, prioFilter, lateToggle, resetBtn),
+      toolbarEl,
       content,
     );
     paint();
@@ -2168,8 +2427,20 @@
     closeMenu();
     closeInbox();
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
-    if (!state.user) return viewAuth();
+    // плавное появление нового экрана
+    app.classList.remove('page-enter');
+    void app.offsetWidth;
+    app.classList.add('page-enter');
     const hash = location.hash || '#/';
+    if (!state.user) {
+      if (hash === '#/login') return viewAuth('login');
+      if (hash === '#/register') return viewAuth('register');
+      return /^#\/(w|p)\//.test(hash) ? viewAuth('login') : viewLanding();
+    }
+    if (hash === '#/login' || hash === '#/register') {
+      location.hash = '#/';
+      return;
+    }
     const [, kind, id, tab] = hash.match(/^#\/(?:(w|p)\/([\w-]+)(?:\/(\w+))?)?$/) || [];
     try {
       if (kind === 'w') await viewWorkspace(id, tab);
