@@ -600,10 +600,8 @@ route(
     const token = cleanString(body.token, 'токен', { max: 100 });
     const row = await env.DB.prepare('SELECT user_id, expires_at FROM email_verifications WHERE token_hash = ?').bind(await sha256(token)).first();
     if (!row || row.expires_at < now()) fail(400, 'ссылка недействительна или устарела, запроси новое письмо в кабинете');
-    await env.DB.batch([
-      env.DB.prepare('UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?').bind(now(), row.user_id),
-      env.DB.prepare('DELETE FROM email_verifications WHERE user_id = ?').bind(row.user_id),
-    ]);
+    // ссылка остаётся рабочей до конца срока: повторное открытие или предпросмотр почтовиком её не ломают
+    await env.DB.prepare('UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?').bind(now(), row.user_id).run();
     return json({ ok: true });
   },
   { auth: false },

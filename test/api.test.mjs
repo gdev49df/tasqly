@@ -648,10 +648,10 @@ ok('тариф «Старт»: в пространстве не больше 3 �
   assert.equal((await c('POST', '/api/me/verify/send', {})).status, 429, 'письмо не чаще раза в минуту');
   assert.equal((await client()('POST', '/api/auth/verify', { token: reg.data.debug_verify_token })).status, 200);
   assert.equal((await c('GET', '/api/me')).data.user.email_verified, true);
-  assert.equal((await client()('POST', '/api/auth/verify', { token: reg.data.debug_verify_token })).status, 400, 'ссылка одноразовая');
+  assert.equal((await client()('POST', '/api/auth/verify', { token: reg.data.debug_verify_token })).status, 200, 'повторное открытие ссылки не ломается');
   assert.equal((await c('POST', '/api/me/verify/send', {})).status, 409, 'уже подтверждена');
 }
-ok('подтверждение почты: ссылка одноразовая, письмо не чаще раза в минуту');
+ok('подтверждение почты: ссылка работает повторно, письмо не чаще раза в минуту');
 
 {
   const owner = client();

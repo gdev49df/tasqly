@@ -1896,3 +1896,4 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .st-item span:not(.st-dot) { color: var(--muted); font-size: 13.5px; }
 .btn[hidden] { display: none; }
 .cl-rel h2 { color: var(--text); }
+.auth .logo + .card { margin-top: 30px; }

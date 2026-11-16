@@ -1804,12 +1804,15 @@
   }
 
   // переход по ссылке из письма
+  const verifyRuns = new Map();
   async function viewVerify(token) {
     document.title = 'Подтверждение почты · tasqly';
     const card = h('div', { class: 'card' }, h('p', { class: 'sub' }, 'Подтверждаем…'));
     render(h('div', { class: 'auth' }, logoEl(), card));
     try {
-      await api.post('/api/auth/verify', { token });
+      // экран может перерисоваться (обновился профиль), запрос при этом должен уйти один раз
+      if (!verifyRuns.has(token)) verifyRuns.set(token, api.post('/api/auth/verify', { token }));
+      await verifyRuns.get(token);
       if (state.user) { state.user = { ...state.user, email_verified: true }; saveUser(); }
       card.replaceChildren(h('h1', { style: 'font-size:20px;margin:0 0 8px' }, 'Почта подтверждена'), h('p', { class: 'sub' }, 'Спасибо! Можно продолжать работу.'), h('a', { class: 'btn', href: state.user ? '#/' : '#/login' }, state.user ? 'В кабинет' : 'Войти'));
     } catch (e) {
