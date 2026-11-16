@@ -1857,6 +1857,6 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .auth-back.link-btn { text-decoration: none; margin-top: 18px; }
 
 /* v9.8 — мобильная ширина: страницы не шире экрана */
-#app > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
 .pg { width: 100%; }
+.pg { box-sizing: border-box; min-width: 0; }
 .pg-cta, .pg-cards, .lim, .cmp-wrap { min-width: 0; max-width: 100%; }
