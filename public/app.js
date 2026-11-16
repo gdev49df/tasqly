@@ -636,6 +636,7 @@
       if (el) el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     };
     const logo = logoEl();
+    const calmMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const chev = () => { const sp = h('span', { class: 'chev', 'aria-hidden': 'true' }); sp.innerHTML = '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>'; return sp; };
     const dd = (label, items) => h('button', { class: 'nav-dd', 'aria-haspopup': 'menu', onclick: (e) => openMenu(e.currentTarget, items.map(([t, id]) => ({ label: t, onClick: to(id) }))) }, label, chev());
@@ -651,7 +652,7 @@
         { class: 'land-nav' },
         logo,
         h('span', { class: 'grow' }),
-        h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'features'], ['Учёт времени', 'features'], ['AI tasqly', 'features']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать')),
+        h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'features'], ['Учёт времени', 'features'], ['AI tasqly', 'features']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать'), h('button', { onclick: to('pricing') }, 'Тарифы')),
         ...(state.user
           ? [h('a', { class: 'btn small', href: PANEL }, 'Кабинет')]
           : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: PANEL + '#/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: PANEL + '#/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: PANEL + '#/register' }, 'Начать сейчас')]),
@@ -691,25 +692,13 @@
       ['IT', 'Для разработки: спринты, ревью, баги и фичи', ['Бэклог', 'Спринт', 'В работе', 'Code review', 'Тестирование', 'Готово']],
     ];
 
-    const roles = [
-      ['Руководителю', ['Видно, что в работе, что просрочено и у кого перегруз', 'Обзор проекта: процент выполнения и ближайшие дедлайны', 'AI отвечает на вопрос «что горит» за секунды']],
-      ['Менеджеру проектов', ['Три типа проектов и свои колонки под процесс', 'Доска, список и календарь над одними и теми же задачами', 'Оценка времени против факта по каждой задаче']],
-      ['Разработчику', ['Колонки спринта, code review и тестирования', 'Типы задач: задача, баг, фича, тех. долг', 'Таймер в задаче и чек-листы для подзадач']],
-      ['Фрилансеру и одиночке', ['Базовый проект на три колонки, без лишнего', 'Личные заметки и файлы в одном месте', 'AI разобьёт большое дело на шаги']],
-    ];
     const tabsData = [
       ['Планирование', 'Ставь задачи, назначай исполнителей и сроки, раскладывай по колонкам и меткам. Перетаскивай карточки на доске и даты в календаре.'],
       ['Время', 'Включай таймер прямо в задаче или вноси время вручную. Отчёт по людям и проектам показывает, куда уходят часы.'],
       ['Общение', 'Чат пространства, комментарии к задачам и общие заметки. Договорённости остаются рядом с работой.'],
       ['AI', 'Помощник знает твои задачи: подскажет, что горит, соберёт план на день и превратит текст встречи в список задач.'],
     ];
-    let roleIdx = 0, tabIdx = 0;
-    const rolesBox = h('div', { class: 'roles' });
-    const paintRoles = () => rolesBox.replaceChildren(
-      h('div', { class: 'role-tabs', role: 'tablist' }, roles.map(([n], i) => h('button', { role: 'tab', class: i === roleIdx ? 'active' : '', 'aria-selected': String(i === roleIdx), onclick: () => { roleIdx = i; paintRoles(); } }, n))),
-      h('ul', { class: 'role-list' }, roles[roleIdx][1].map((t) => h('li', null, t))),
-    );
-    paintRoles();
+    let tabIdx = 0;
     const tabsBox = h('div', { class: 'ftabs' });
     const paintTabs = () => tabsBox.replaceChildren(
       h('div', { class: 'role-tabs', role: 'tablist' }, tabsData.map(([n], i) => h('button', { role: 'tab', class: i === tabIdx ? 'active' : '', 'aria-selected': String(i === tabIdx), onclick: () => { tabIdx = i; paintTabs(); } }, n))),
@@ -718,11 +707,120 @@
     );
     paintTabs();
 
-    const steps = [
-      ['Создай пространство', 'Это место для твоей команды. Пригласи людей кодом из шести символов.'],
-      ['Заведи проект', 'Выбери тип под свой процесс. Колонки можно менять как угодно.'],
-      ['Веди работу', 'Ставь задачи, включай таймер, пиши в чат и спрашивай AI, что горит.'],
+
+    // ---------- витрина: живые мини-экраны продукта ----------
+    const svgEl = (html, cls, size) => { const sp = h('span', { class: cls, 'aria-hidden': 'true' }); sp.innerHTML = html; return sp; };
+    const clockText = (sec) => `${String(Math.floor(sec / 3600)).padStart(2, '0')}:${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+    let tick = 2537;
+    const clock = h('b', { class: 'sc-clock' }, clockText(tick));
+    const timerId = setInterval(() => { tick += 1; clock.textContent = clockText(tick); }, 1000);
+
+    const people = [['Айгерим', 80, '6 ч 40 мин', '#3e63dd'], ['Данияр', 52, '4 ч 15 мин', '#8e4ec6'], ['Мария', 26, '2 ч 05 мин', '#30a46c']];
+    const mockTime = h(
+      'div',
+      { class: 'sc-mock reveal', 'aria-hidden': 'true' },
+      h('div', { class: 'sc-task' }, h('span', { class: 'pill', style: '--c:#3e63dd' }, 'дизайн'), h('b', null, 'Нарисовать главную')),
+      h('div', { class: 'sc-timer' }, h('span', { class: 'rec' }), clock, h('span', { class: 'sc-stop' }, 'Стоп'), h('em', null, 'из 4 ч по оценке')),
+      h('div', { class: 'sc-sub' }, 'Время по людям за неделю'),
+      ...people.map(([n, w, t, c]) => h('div', { class: 'sc-bar' }, h('span', { class: 'sc-name' }, n), h('i', { style: `--w:${w}%;--c:${c}` }), h('span', { class: 'sc-val' }, t))),
+    );
+
+    const R = 52, CIRC = 2 * Math.PI * R;
+    const mockOverview = h(
+      'div',
+      { class: 'sc-mock reveal', 'aria-hidden': 'true' },
+      h('div', { class: 'sc-ov' },
+        svgEl(`<svg viewBox="0 0 120 120" width="132" height="132"><circle cx="60" cy="60" r="${R}" fill="none" stroke="var(--border)" stroke-width="10"/><circle class="ring-fg" cx="60" cy="60" r="${R}" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${CIRC.toFixed(1)}" style="--len:${CIRC.toFixed(1)};--to:${(CIRC * 0.32).toFixed(1)}" transform="rotate(-90 60 60)"/></svg><div class="ring-txt"><b>68%</b><span>готово</span></div>`, 'sc-ring'),
+        h('div', { class: 'sc-tiles' },
+          ...[['В работе', '7', '#3e63dd'], ['Просрочено', '2', '#e5484d'], ['Завершено', '21', '#30a46c'], ['Без исполнителя', '1', '#a0a0ac']].map(([l, n, c]) => h('div', { class: 'sc-tile', style: `--c:${c}` }, h('b', null, n), h('span', null, l))),
+        ),
+      ),
+      h('div', { class: 'sc-deadlines' }, h('div', null, h('span', { class: 'dot late' }), 'Подключить оплату', h('em', null, 'вчера')), h('div', null, h('span', { class: 'dot' }), 'Написать тексты', h('em', null, '19 нояб.')), h('div', null, h('span', { class: 'dot' }), 'Согласовать макеты', h('em', null, '21 нояб.'))),
+    );
+
+    const mockAi = h(
+      'div',
+      { class: 'sc-mock reveal', 'aria-hidden': 'true' },
+      h('div', { class: 'sc-msg me' }, 'Что горит на этой неделе?'),
+      h('div', { class: 'sc-msg ai' }, h('span', { class: 'avatar ai-avatar' }, 'AI'), h('div', null, h('p', null, 'Две задачи требуют внимания:'), h('ul', null, h('li', null, h('b', null, 'Подключить оплату'), ' просрочена, нет исполнителя'), h('li', null, h('b', null, 'Согласовать макеты'), ' срок через 5 дней')))),
+      h('div', { class: 'sc-chips' }, ['Назначить Данияра', 'Разбить на шаги', 'План на день'].map((t) => h('span', null, t))),
+    );
+
+    const showcase = [
+      ['Время', 'Видно, куда уходят часы', 'Таймер включается прямо в задаче. По окончании время записывается, и сразу видно, сколько ушло против оценки и кто сколько работал.', mockTime],
+      ['Обзор', 'Весь проект на одном экране', 'Процент готовности, просрочки, нагрузка на команду и ближайшие сроки. Открыл и понял, где проект, без отчётов.', mockOverview],
+      ['AI', 'Помощник знает твои задачи', 'Спроси «что горит» и получишь ответ по твоим данным. Он же разобьёт большую задачу на шаги и соберёт план на день.', mockAi],
+    ].map(([tag, title, text, mock], i) => h('div', { class: `sc-row${i % 2 ? ' flip' : ''}` }, h('div', { class: 'sc-copy reveal' }, h('span', { class: 'sc-tag' }, tag), h('h3', null, title), h('p', null, text)), mock));
+
+    // ---------- роли: карусель карточек, сама ходит из стороны в сторону ----------
+    const miniRing = (pct, color, num) => { const r = 24, c = 2 * Math.PI * r; return svgEl(`<svg viewBox="0 0 64 64" width="62" height="62"><circle cx="32" cy="32" r="${r}" fill="none" stroke="var(--border)" stroke-width="6"/><circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - pct / 100)).toFixed(1)}" transform="rotate(-90 32 32)"/></svg><b>${num}</b>`, 'rc-ring'); };
+    const roleCards = [
+      ['Руководителям', ['Контроль задач', 'Обзор проекта', 'Нагрузка команды', 'AI «что горит»'],
+        h('div', { class: 'rc-vis rc-rings' }, miniRing(68, 'var(--accent)', '68%'), miniRing(25, '#e5484d', '2'), miniRing(90, '#30a46c', '21'), h('span', { class: 'rc-leg' }, 'готово · просрочено · завершено'))],
+      ['Менеджерам проектов', ['Доска, список, календарь', 'Свои колонки', 'Метки и фильтры', 'Оценка времени'],
+        h('div', { class: 'rc-vis rc-gantt' }, ...[['Дизайн', 8, 46, '#8e4ec6'], ['Вёрстка', 30, 40, '#3e63dd'], ['Тесты', 58, 34, '#30a46c'], ['Запуск', 78, 18, '#e5484d']].map(([n, l, w, c]) => h('div', { class: 'g-row' }, h('span', null, n), h('i', null, h('u', { style: `left:${l}%;width:${w}%;background:${c}` })))))],
+      ['Разработчикам', ['Колонки спринта', 'Баги и фичи', 'Code review', 'Чек-листы'],
+        h('div', { class: 'rc-vis rc-board' }, ...[['Спринт', ['Авторизация', 'API задач']], ['Review', ['Таймер']], ['Готово', ['Миграции']]].map(([n, cards]) => h('div', null, h('em', null, n), ...cards.map((t) => h('span', null, t)))))],
+      ['Фрилансерам', ['Базовый проект', 'Таймер в задаче', 'Заметки', 'Файлы'],
+        h('div', { class: 'rc-vis rc-free' }, h('div', { class: 'rf-top' }, h('b', null, '32 ч 15 мин'), h('span', null, 'за неделю')), ...[['Лендинг для клиента', '12 ч'], ['Логотип', '7 ч 30 мин'], ['Правки', '2 ч 45 мин']].map(([n, t]) => h('div', { class: 'rf-row' }, h('span', null, n), h('em', null, t))))],
+      ['Небольшим командам', ['Общий чат', 'Диск с файлами', 'Приглашение по коду', 'Роли доступа'],
+        h('div', { class: 'rc-vis rc-team' }, h('div', { class: 'rt-msg' }, h('span', { class: 'avatar', style: 'background:#3e63dd' }, 'А'), 'Макеты готовы, смотрите'), h('div', { class: 'rt-msg me' }, 'Принято, беру вёрстку'), h('div', { class: 'rt-file' }, h('i', null, 'PDF'), 'бриф-клиента.pdf', h('em', null, '184 КБ')))],
     ];
+    const track = h('div', { class: 'rc-track' }, h('article', { class: 'rc rc-intro' }, h('span', { class: 'rc-brand' }, svgEl('<svg viewBox="0 0 512 512" width="30" height="30"><rect width="512" height="512" rx="112" fill="#fff" fill-opacity=".22"/><g fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g></svg>', 'rc-mark')), h('h2', null, 'Одно решение для всех ролей'), h('div', { class: 'rc-avatars' }, ...['#3e63dd', '#8e4ec6', '#30a46c', '#e5484d'].map((c, i) => h('span', { class: 'avatar', style: `background:${c}` }, 'АДМС'[i])))), ...roleCards.map(([title, tags, vis]) => h('article', { class: 'rc' }, h('h3', null, title), h('div', { class: 'rc-tags' }, tags.map((t) => h('span', null, t))), vis)));
+    const slide = (dir) => track.scrollBy({ left: dir * Math.min(360, track.clientWidth * 0.8), behavior: calmMotion ? 'auto' : 'smooth' });
+    const rolesBox = h('div', { class: 'rc-wrap' }, track, h('button', { class: 'rc-arrow prev', 'aria-label': 'Назад', onclick: () => { stopAuto(); slide(-1); } }, '‹'), h('button', { class: 'rc-arrow next', 'aria-label': 'Вперёд', onclick: () => { stopAuto(); slide(1); } }, '›'));
+    // автоход: вправо до конца, потом обратно; пауза при наведении и касании
+    let autoDir = 1, autoId = null, autoOn = true;
+    function stopAuto() { autoOn = false; }
+    autoId = !calmMotion ? setInterval(() => {
+      if (!autoOn || document.hidden) return;
+      const max = track.scrollWidth - track.clientWidth;
+      if (autoDir > 0 && track.scrollLeft >= max - 4) autoDir = -1;
+      else if (autoDir < 0 && track.scrollLeft <= 4) autoDir = 1;
+      slide(autoDir);
+    }, 2800) : null;
+    rolesBox.addEventListener('pointerenter', () => { autoOn = false; });
+    rolesBox.addEventListener('pointerleave', () => { autoOn = true; });
+    rolesBox.addEventListener('touchstart', () => { autoOn = false; }, { passive: true });
+
+    // ---------- тарифы (названия и цены меняются здесь) ----------
+    const PLANS = [
+      { key: 'start', icon: '◎', name: 'Старт', price: '0 ₸', per: 'навсегда', text: 'Для одиночек и небольших дел: проекты, задачи, заметки и таймер.' },
+      { key: 'team', icon: '✦', name: 'Команда', price: '2 500 ₸', per: 'за человека в мес', text: 'Для команд, где важны контроль, учёт времени, чат, диск и AI-помощник.' },
+      { key: 'biz', icon: '▦', name: 'Бизнес', price: 'по запросу', per: '', text: 'Для компаний: свои требования, поддержка и помощь с запуском.' },
+    ];
+    const pricing = h('section', { class: 'land-sec', id: 'pricing' }, h('div', { class: 'pr' },
+      h('div', { class: 'pr-copy reveal' }, h('h2', null, 'Тарифы под любой бюджет'), h('p', null, 'Начни бесплатно и переходи дальше, когда команда вырастет.'), h('div', { class: 'pr-from' }, h('b', null, `от ${PLANS[1].price}`), h('span', null, ' / мес за человека')), h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Подробнее')),
+      h('div', { class: 'pr-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i} reveal`, style: `transition-delay:${i * 90}ms` }, h('span', { class: 'pr-ic', 'aria-hidden': 'true' }, pl.icon), h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text)))),
+    ));
+
+    // «как начать»: три шага с мини-иллюстрациями
+    let kindIdx = 1;
+    const kindCols = [['К выполнению', 'В работе', 'Готово'], ['Бэклог', 'К выполнению', 'В работе', 'На проверке', 'Готово'], ['Бэклог', 'Спринт', 'В работе', 'Code review', 'Тестирование', 'Готово']];
+    const kindNames = ['Базовый', 'Продвинутый', 'IT'];
+    const colsRow = h('div', { class: 'st-cols' });
+    const kindBtns = h('div', { class: 'st-kinds', role: 'tablist' });
+    const paintKind = () => {
+      kindBtns.replaceChildren(...kindNames.map((n, i) => h('button', { type: 'button', role: 'tab', class: i === kindIdx ? 'active' : '', 'aria-selected': String(i === kindIdx), onclick: () => { kindIdx = i; paintKind(); } }, n)));
+      colsRow.replaceChildren(...kindCols[kindIdx].map((c, i, a) => h('span', { class: i === a.length - 1 ? 'done' : '' }, c)));
+    };
+    paintKind();
+    const code = 'K7P2QX'.split('').map((ch) => h('i', null, ch));
+    const stepsData = [
+      ['Создай пространство', 'Место для команды. Другие входят по коду из шести символов.', h('div', { class: 'st-vis' }, h('div', { class: 'st-code' }, ...code), h('div', { class: 'st-people' }, ...['#3e63dd', '#8e4ec6', '#30a46c'].map((c, i) => h('span', { class: 'avatar', style: `background:${c}` }, 'АДМ'[i])), h('em', null, '3 человека уже внутри')))],
+      ['Заведи проект', 'Выбери тип под свой процесс. Колонки потом можно менять.', h('div', { class: 'st-vis' }, kindBtns, colsRow)],
+      ['Веди работу', 'Ставь задачи, включай таймер, спрашивай AI, что горит.', h('div', { class: 'st-vis' }, h('div', { class: 'st-task' }, h('b', null, 'Нарисовать главную'), h('span', { class: 'st-tm' }, '⏱ 00:42'), h('ul', null, h('li', { class: 'ok' }, 'Собрать референсы'), h('li', { class: 'ok' }, 'Набросать структуру'), h('li', null, 'Подготовить макет'))))],
+    ];
+    const stepsSection = h('section', { class: 'land-sec', id: 'steps' }, h('h2', null, 'Как начать: три шага, меньше минуты'), h('ol', { class: 'st' }, stepsData.map(([t, d, vis], i) => h('li', { class: 'reveal' }, h('span', { class: 'step-n' }, i + 1), h('b', null, t), h('span', { class: 'st-d' }, d), vis))));
+
+    // плавное появление при прокрутке; без анимаций, если система просит меньше движения
+    const calm = calmMotion;
+    let io = null;
+    if (!calm && 'IntersectionObserver' in window) {
+      io = new IntersectionObserver((entries) => entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { threshold: 0.25 });
+      setTimeout(() => document.querySelectorAll('.land .reveal').forEach((el) => io.observe(el)), 0);
+    } else setTimeout(() => document.querySelectorAll('.land .reveal').forEach((el) => el.classList.add('in')), 0);
+    cleanup = () => { clearInterval(timerId); if (autoId) clearInterval(autoId); if (io) io.disconnect(); };
 
     render(
       h(
@@ -742,7 +840,8 @@
           ),
           demo,
         ),
-        h('section', { class: 'land-sec', id: 'roles' }, h('h2', null, 'Одно решение для разных ролей'), rolesBox),
+        h('section', { class: 'land-sec', id: 'showcase' }, h('h2', null, 'Не просто доска: всё для работы рядом'), h('div', { class: 'sc' }, showcase)),
+        h('section', { class: 'land-sec wide', id: 'roles' }, rolesBox),
         h('section', { class: 'land-sec', id: 'tabs' }, h('h2', null, 'tasqly подстраивается под твои задачи'), tabsBox),
         h('section', { class: 'land-sec', id: 'features' }, h('h2', null, 'Всё, что нужно для работы, в одном месте'), h('dl', { class: 'feat' }, features.map(([t, d]) => h('div', null, h('dt', null, t), h('dd', null, d))))),
         h(
@@ -751,7 +850,8 @@
           h('h2', null, 'Проект под твой процесс'),
           h('div', { class: 'kinds-list' }, kinds.map(([name, hint, cols]) => h('div', { class: 'kind-row' }, h('div', { class: 'kind-info' }, h('b', null, name), h('span', null, hint)), h('div', { class: 'kind-cols' }, cols.map((c, i) => h('span', { class: `kcol${i === cols.length - 1 ? ' done' : ''}` }, c)))))),
         ),
-        h('section', { class: 'land-sec', id: 'steps' }, h('h2', null, 'Как начать'), h('ol', { class: 'steps' }, steps.map(([t, d], i) => h('li', null, h('span', { class: 'step-n' }, i + 1), h('div', null, h('b', null, t), h('span', null, d)))))),
+        stepsSection,
+        pricing,
         h('section', { class: 'land-cta' }, h('h2', null, 'Собери команду в одном месте'), h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Создать пространство')),
       ),
     );
