@@ -1816,3 +1816,7 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .search-sub { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .search-hint { padding: 22px 12px; text-align: center; color: var(--muted); font-size: 14px; }
 @media (max-width: 640px) { .search-pop { padding-top: 0; } .search-modal { border-radius: 16px 16px 0 0; } }
+
+/* v9.3 публичный просмотр */
+.share-badge { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+@media (max-width: 640px) { .share-badge { display: none; } }

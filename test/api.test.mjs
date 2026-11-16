@@ -475,6 +475,30 @@ ok('голос: расшифровка записи, проверки и пра�
   assert.equal(r.data.tasks.length, 0);
 }
 ok('поиск: находит своё, не показывает чужое, спецсимволы экранированы');
+{
+  const sp = (await alice('POST', '/api/workspaces', { name: 'публичный' })).data.workspace;
+  const spr = (await alice('POST', `/api/workspaces/${sp.id}/projects`, { name: 'Для заказчика' })).data.project;
+  await alice('POST', `/api/projects/${spr.id}/tasks`, { title: 'Секретная задача', description: 'приватное описание' });
+  const code3 = (await alice('GET', `/api/workspaces/${sp.id}`)).data.workspace.invite_code;
+  await bob('POST', '/api/workspaces/join', { code: code3 });
+  assert.equal((await client()('GET', '/api/public/project/' + '0'.repeat(32))).status, 404);
+  assert.equal((await bob('POST', `/api/projects/${spr.id}/share`, {})).status, 403, 'не владелец не делится');
+  r = await alice('POST', `/api/projects/${spr.id}/share`, {});
+  assert.equal(r.status, 200);
+  const tok = r.data.share_token;
+  assert.match(tok, /^[0-9a-f]{32}$/);
+  assert.equal((await alice('POST', `/api/projects/${spr.id}/share`, {})).data.share_token, tok, 'ссылка не меняется при повторе');
+  r = await client()('GET', `/api/public/project/${tok}`);
+  assert.equal(r.status, 200);
+  assert.equal(r.data.tasks[0].title, 'Секретная задача');
+  assert.ok(!JSON.stringify(r.data).includes('приватное описание'), 'описание не отдаётся');
+  assert.ok(!JSON.stringify(r.data).includes('@test.dev'), 'email не отдаётся');
+  assert.equal((await alice('GET', `/api/projects/${spr.id}`)).data.project.share_token, tok);
+  assert.equal((await bob('GET', `/api/projects/${spr.id}`)).data.project.share_token, undefined, 'токен видит только владелец');
+  await alice('DELETE', `/api/projects/${spr.id}/share`, {});
+  assert.equal((await client()('GET', `/api/public/project/${tok}`)).status, 404, 'после выключения ссылка мертва');
+}
+ok('публичная ссылка: только просмотр, без лишних данных, выключается');
 ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
 
 // лимиты на количество объектов

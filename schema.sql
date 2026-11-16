@@ -40,9 +40,11 @@ CREATE TABLE IF NOT EXISTS projects (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'basic', -- basic, advanced, it
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  share_token TEXT -- публичная ссылка только для просмотра, пусто = выключена
 );
 CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_share ON projects(share_token) WHERE share_token IS NOT NULL;
 
 -- колонки доски: у каждого проекта свои, названия и порядок настраиваются
 CREATE TABLE IF NOT EXISTS columns (

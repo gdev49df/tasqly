@@ -134,7 +134,7 @@ async function requireMember(env, workspaceId, userId) {
 
 async function projectContext(env, projectId, userId) {
   const project = await env.DB.prepare(
-    `SELECT p.id, p.name, p.kind, p.workspace_id, w.name AS workspace_name, m.role FROM projects p
+    `SELECT p.id, p.name, p.kind, p.workspace_id, w.name AS workspace_name, p.share_token, m.role FROM projects p
      JOIN workspaces w ON w.id = p.workspace_id
      JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?
      WHERE p.id = ?`,
@@ -664,7 +664,7 @@ route('GET', '/api/projects/:id', async ({ env, user, params }) => {
     env.DB.prepare('SELECT id, name, color FROM labels WHERE workspace_id = ? ORDER BY created_at').bind(project.workspace_id).all(),
   ]);
   return json({
-    project: { id: project.id, name: project.name, kind: project.kind, workspace_id: project.workspace_id, workspace_name: project.workspace_name, role: project.role },
+    project: { id: project.id, name: project.name, kind: project.kind, workspace_id: project.workspace_id, workspace_name: project.workspace_name, role: project.role, share_token: project.role === 'owner' ? project.share_token || null : undefined },
     columns: columns.results.map((c) => ({ ...c, is_done: !!c.is_done })),
     tasks: tasks.results.map(shapeTask),
     members: members.results,
@@ -685,6 +685,54 @@ route('DELETE', '/api/projects/:id', async ({ env, user, params }) => {
   await env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(params.id).run();
   return json({ ok: true });
 });
+
+// публичная ссылка на проект: только просмотр, включает и выключает владелец
+route('POST', '/api/projects/:id/share', async ({ env, user, params }) => {
+  const project = await projectContext(env, params.id, user.id);
+  if (project.role !== 'owner') fail(403, 'ссылкой делится только владелец');
+  const token = project.share_token || randomHex(16);
+  await env.DB.prepare('UPDATE projects SET share_token = ? WHERE id = ?').bind(token, params.id).run();
+  return json({ share_token: token });
+});
+
+route('DELETE', '/api/projects/:id/share', async ({ env, user, params }) => {
+  const project = await projectContext(env, params.id, user.id);
+  if (project.role !== 'owner') fail(403, 'ссылкой делится только владелец');
+  await env.DB.prepare('UPDATE projects SET share_token = NULL WHERE id = ?').bind(params.id).run();
+  return json({ ok: true });
+});
+
+route(
+  'GET',
+  '/api/public/project/:token',
+  async ({ env, params }) => {
+    if (!/^[0-9a-f]{32}$/.test(params.token)) fail(404, 'ссылка недействительна');
+    const project = await env.DB.prepare('SELECT p.id, p.name, w.name AS workspace_name FROM projects p JOIN workspaces w ON w.id = p.workspace_id WHERE p.share_token = ?').bind(params.token).first();
+    if (!project) fail(404, 'ссылка недействительна или отключена');
+    const [columns, tasks, labels] = await Promise.all([
+      env.DB.prepare('SELECT id, name, is_done FROM columns WHERE project_id = ? ORDER BY position, created_at').bind(project.id).all(),
+      env.DB.prepare(
+        `SELECT t.id, t.column_id, t.title, t.priority, t.due_date, u.name AS assignee,
+           (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id) AS check_total,
+           (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id AND i.done = 1) AS check_done,
+           (SELECT group_concat(label_id) FROM task_labels tl WHERE tl.task_id = t.id) AS label_ids
+         FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.project_id = ? ORDER BY t.position, t.created_at`,
+      ).bind(project.id).all(),
+      env.DB.prepare('SELECT l.id, l.name, l.color FROM labels l JOIN projects p ON p.workspace_id = l.workspace_id WHERE p.id = ?').bind(project.id).all(),
+    ]);
+    return json(
+      {
+        project: { name: project.name, workspace_name: project.workspace_name },
+        columns: columns.results.map((c) => ({ ...c, is_done: !!c.is_done })),
+        tasks: tasks.results.map(shapeTask),
+        labels: labels.results,
+      },
+      200,
+      { 'x-robots-tag': 'noindex' },
+    );
+  },
+  { auth: false },
+);
 
 // колонки
 

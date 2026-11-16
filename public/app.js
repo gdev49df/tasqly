@@ -1473,6 +1473,46 @@
     );
   }
 
+  // ---------- публичный просмотр проекта по ссылке ----------
+
+  async function viewShared(token) {
+    render(h('div', { class: 'container' }, h('div', { class: 'empty' }, 'Загрузка…')));
+    let data;
+    try {
+      data = await api.get(`/api/public/project/${token}`);
+    } catch (e) {
+      document.title = 'tasqly';
+      return render(h('div', { class: 'auth' }, logoEl(), h('div', { class: 'card' }, h('h1', { style: 'font-size:20px;margin:0 0 8px' }, 'Ссылка не работает'), h('p', { class: 'sub' }, e.message), h('a', { class: 'btn', href: '/' }, 'На главную'))));
+    }
+    document.title = `${data.project.name} · tasqly`;
+    let meta = document.querySelector('meta[name=robots]');
+    if (!meta) { meta = h('meta', { name: 'robots' }); document.head.append(meta); }
+    meta.setAttribute('content', 'noindex');
+    const labelById = new Map(data.labels.map((l) => [l.id, l]));
+    const prioIcon = (n) => (n ? h('span', { class: `prio p${n}`, title: `Приоритет: ${PRIORITIES[n].toLowerCase()}` }, h('i'), h('i'), h('i')) : null);
+    const today = todayIso();
+    const col = (c) => {
+      const tasks = data.tasks.filter((t) => t.column_id === c.id);
+      return h('section', { class: 'column' },
+        h('div', { class: 'col-head' }, h('span', { class: 'name' }, c.name), c.is_done ? h('span', { class: 'done-mark' }, '✓') : null, h('span', { class: 'count' }, tasks.length)),
+        h('div', { class: 'cards' }, tasks.map((t) =>
+          h('div', { class: `task${c.is_done ? ' done' : ''}` },
+            t.label_ids.length ? h('div', { class: 'pills' }, t.label_ids.map((lid) => labelById.get(lid)).filter(Boolean).map((l) => h('span', { class: 'pill', style: `--c:${l.color}` }, l.name))) : null,
+            h('div', { class: 'title' }, t.title),
+            h('div', { class: 'meta' },
+              prioIcon(t.priority),
+              t.due_date ? h('span', { class: !c.is_done && t.due_date < today ? 'late' : '' }, formatDate(t.due_date)) : null,
+              t.check_total ? h('span', { class: t.check_done === t.check_total ? 'ok' : '' }, `☑ ${t.check_done}/${t.check_total}`) : null,
+              h('span', { class: 'grow' }),
+              t.assignee ? avatar(t.assignee) : null)))));
+    };
+    render(
+      h('header', { class: 'topbar' }, logoEl(), h('nav', { class: 'crumbs' }, h('span', null, '/'), h('span', { class: 'current' }, data.project.name)), h('span', { class: 'grow' }), themeToggle(), h('span', { class: 'share-badge' }, 'Только просмотр'), h('a', { class: 'btn small', href: '/register' }, 'Создать свой')),
+      h('div', { class: 'project-head' }, h('h1', { style: 'font-size:22px;margin:0' }, data.project.name), h('span', { class: 'sub', style: 'margin-left:10px' }, data.project.workspace_name)),
+      h('div', { class: 'board' }, data.columns.map(col)),
+    );
+  }
+
   // ---------- главная: пространства ----------
 
   // подсказки для новичка: четыре шага на главной, пока не пройдены или не скрыты
@@ -3313,9 +3353,44 @@
     more.addEventListener('click', () =>
       openMenu(more, [
         { label: 'Переименовать проект', onClick: () => titleEl.click() },
+        { label: S.project.share_token ? 'Публичная ссылка: включена' : 'Поделиться ссылкой', disabled: S.project.role !== 'owner', onClick: openShare },
         { label: 'Удалить проект', danger: true, disabled: S.project.role !== 'owner', onClick: deleteProject },
       ]),
     );
+    function openShare() {
+      const overlay = h('div', { class: 'overlay' });
+      const close = () => closeOverlay(overlay);
+      overlay.addEventListener('tq-close', close);
+      overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+      const body = h('div');
+      const linkOf = (tok) => `${location.origin}${PANEL}#/share/${tok}`;
+      const paintShare = () => {
+        const tok = S.project.share_token;
+        if (!tok) {
+          const on = h('button', { class: 'btn', type: 'button' }, 'Включить ссылку');
+          on.addEventListener('click', async () => {
+            on.disabled = true;
+            try { S.project.share_token = (await api.post(`/api/projects/${id}/share`, {})).share_token; paintShare(); } catch (e) { toast(e.message); on.disabled = false; }
+          });
+          return body.replaceChildren(h('p', { class: 'sub', style: 'margin:0 0 14px' }, 'Любой, у кого есть ссылка, сможет посмотреть доску проекта без входа. Менять ничего нельзя, описания и комментарии не показываются.'), h('div', { class: 'modal-actions' }, on));
+        }
+        const input = h('input', { type: 'text', readonly: true, value: linkOf(tok), 'aria-label': 'Публичная ссылка' });
+        input.addEventListener('focus', () => input.select());
+        const copy = h('button', { class: 'btn', type: 'button' }, 'Скопировать');
+        copy.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(input.value); toast('Ссылка скопирована'); } catch { input.select(); toast('Скопируй ссылку вручную'); }
+        });
+        const off = h('button', { class: 'btn danger small', type: 'button' }, 'Выключить');
+        off.addEventListener('click', async () => {
+          off.disabled = true;
+          try { await api.del(`/api/projects/${id}/share`); S.project.share_token = null; paintShare(); toast('Ссылка выключена'); } catch (e) { toast(e.message); off.disabled = false; }
+        });
+        body.replaceChildren(h('p', { class: 'sub', style: 'margin:0 0 10px' }, 'Доску проекта можно смотреть без входа. Выключишь ссылку, и она перестанет открываться.'), h('div', { class: 'row', style: 'gap:8px' }, input, copy), h('div', { class: 'modal-actions' }, off));
+      };
+      paintShare();
+      overlay.append(h('div', { class: 'modal narrow', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Публичная ссылка' }, h('div', { class: 'head' }, h('h1', { style: 'font-size:18px;flex:1;margin:0' }, 'Публичная ссылка'), h('button', { class: 'icon-btn', onclick: close, 'aria-label': 'Закрыть' }, '✕')), body));
+      document.body.append(overlay);
+    }
     async function deleteProject() {
       if (!confirm(`Удалить проект «${S.project.name}» со всеми задачами?`)) return;
       try {
@@ -3448,6 +3523,8 @@
       if (['/pricing', '/contacts', '/privacy', '/terms'].includes(path)) return viewPublicPage(path.slice(1));
       return viewLanding();
     }
+    const shareHash = hash.match(/^#\/share\/([0-9a-f]{32})$/);
+    if (shareHash) return viewShared(shareHash[1]);
     const joinHash = hash.match(/^#\/join\/([A-Za-z0-9]{3,20})$/);
     if (!state.user) {
       if (joinHash) {
