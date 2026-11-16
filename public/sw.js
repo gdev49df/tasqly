@@ -1,6 +1,6 @@
 // tasqly: сервис-воркер. оболочка кешируется, api всегда идёт в сеть
-const CACHE = "tasqly-v3";
-const SHELL = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.webmanifest', './icon.svg'];
+const CACHE = "tasqly-v4";
+const SHELL = ['/', '/panel/', '/styles.css', '/app.js', '/config.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -30,6 +30,6 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html'))),
+      .catch(() => caches.match(req).then((hit) => hit || caches.match('/panel/'))),
   );
 });

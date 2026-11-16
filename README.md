@@ -34,7 +34,7 @@ npm run deploy
 
 - `src/worker.js` — API: регистрация и вход (PBKDF2, сессии в D1), пространства, проекты, задачи, комментарии
 - `schema.sql` — схема базы
-- `public/` — PWA: `index.html`, `app.js`, `styles.css`, `manifest.webmanifest`, `sw.js`
+- `public/` — PWA: `index.html` (главная страница, адрес `/`), `panel/index.html` (личный кабинет, адрес `/panel/`), `app.js`, `styles.css`, `manifest.webmanifest`, `sw.js`
 - `test/api.test.mjs` — тест API
 
 ## Что дальше

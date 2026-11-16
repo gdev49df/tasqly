@@ -67,6 +67,8 @@
   }
 
   // адрес api: пусто = тот же домен (cloudflare), иначе внешний (клиент на github pages)
+  const IN_PANEL = /^\/panel(\/|$)/.test(location.pathname);
+  const PANEL = '/panel/';
   const API_BASE = String(window.TASQLY_API || '').replace(/\/$/, '');
 
   async function api(method, path, body) {
@@ -430,7 +432,8 @@
     };
     const go = (href) => () => {
       close();
-      location.hash = href;
+      if (href.startsWith('/')) location.href = href;
+      else location.hash = href;
     };
     const wrap = h(
       'div',
@@ -441,7 +444,7 @@
         { class: 'drawer', role: 'dialog', 'aria-label': 'Меню' },
         h('div', { class: 'drawer-head' }, logoEl({ onclick: close }), h('button', { class: 'icon-btn', 'aria-label': 'Закрыть меню', onclick: close }, '✕')),
         h('button', { class: 'drawer-item', onclick: go('#/') }, icon('home'), 'Кабинет'),
-        h('button', { class: 'drawer-item', onclick: go('#/about') }, icon('spark'), 'О tasqly'),
+        h('button', { class: 'drawer-item', onclick: go('/') }, icon('spark'), 'О tasqly'),
         h('button', { class: 'drawer-item', onclick: () => (close(), openInbox(document.querySelector('.mail-btn'))) }, icon('mail'), 'Входящие'),
         h('div', { class: 'drawer-title' }, 'Пространства'),
         list,
@@ -559,7 +562,7 @@
       },
       '-',
       { label: 'Сменить пароль', onClick: openPasswordModal },
-      { label: 'О tasqly (главная страница)', onClick() { location.hash = '#/about'; } },
+      { label: 'О tasqly (главная страница)', onClick() { location.href = '/'; } },
       '-',
       { label: 'Выйти', danger: true, onClick: logout },
     ]);
@@ -573,7 +576,7 @@
     mark.setAttribute('class', 'logo-mark');
     mark.setAttribute('aria-hidden', 'true');
     mark.innerHTML = '<rect width="512" height="512" rx="112" fill="currentColor"/><g fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round"><circle cx="240" cy="231" r="104"/><path d="M344 140v245"/></g>';
-    return h('a', Object.assign({ class: 'logo', href: '#/', 'aria-label': 'tasqly' }, attrs), mark, h('span', null, 'tasq', h('b', null, 'ly')));
+    return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), mark, h('span', null, 'tasq', h('b', null, 'ly')));
   }
 
   function topbar(crumbs) {
@@ -618,8 +621,7 @@
     state.timerLoaded = false;
     destroyDock();
     lastWsStore.set('');
-    location.hash = '#/';
-    route();
+    location.href = '/';
   }
 
   // ---------- вход ----------
@@ -651,8 +653,8 @@
         h('span', { class: 'grow' }),
         h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'features'], ['Учёт времени', 'features'], ['AI tasqly', 'features']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать')),
         ...(state.user
-          ? [h('a', { class: 'btn small', href: '#/' }, 'Кабинет')]
-          : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '#/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: '#/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: '#/register' }, 'Начать сейчас')]),
+          ? [h('a', { class: 'btn small', href: PANEL }, 'Кабинет')]
+          : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: PANEL + '#/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: PANEL + '#/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: PANEL + '#/register' }, 'Начать сейчас')]),
       );
     }
 
@@ -712,7 +714,7 @@
     const paintTabs = () => tabsBox.replaceChildren(
       h('div', { class: 'role-tabs', role: 'tablist' }, tabsData.map(([n], i) => h('button', { role: 'tab', class: i === tabIdx ? 'active' : '', 'aria-selected': String(i === tabIdx), onclick: () => { tabIdx = i; paintTabs(); } }, n))),
       h('p', { class: 'ftab-text' }, tabsData[tabIdx][1]),
-      h('a', { class: 'btn', href: '#/register' }, 'Попробовать tasqly'),
+      h('a', { class: 'btn', href: PANEL + '#/register' }, 'Попробовать tasqly'),
     );
     paintTabs();
 
@@ -735,7 +737,7 @@
             { class: 'hero-copy' },
             h('h1', null, 'Вся работа команды на одной доске'),
             h('p', null, 'tasqly собирает задачи, учёт времени, заметки, чат и файлы в одном пространстве. AI подскажет, что горит, и разобьёт большую задачу на шаги.'),
-            h('div', { class: 'hero-cta' }, state.user ? h('a', { class: 'btn big', href: '#/' }, 'Открыть кабинет') : [h('a', { class: 'btn big', href: '#/register' }, 'Создать пространство'), h('a', { class: 'btn ghost big', href: '#/login' }, 'Войти')]),
+            h('div', { class: 'hero-cta' }, state.user ? h('a', { class: 'btn big', href: PANEL }, 'Открыть кабинет') : [h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Создать пространство'), h('a', { class: 'btn ghost big', href: PANEL + '#/login' }, 'Войти')]),
             h('div', { class: 'hero-note' }, 'Регистрация за минуту. Карта не нужна.'),
           ),
           demo,
@@ -750,7 +752,7 @@
           h('div', { class: 'kinds-list' }, kinds.map(([name, hint, cols]) => h('div', { class: 'kind-row' }, h('div', { class: 'kind-info' }, h('b', null, name), h('span', null, hint)), h('div', { class: 'kind-cols' }, cols.map((c, i) => h('span', { class: `kcol${i === cols.length - 1 ? ' done' : ''}` }, c)))))),
         ),
         h('section', { class: 'land-sec', id: 'steps' }, h('h2', null, 'Как начать'), h('ol', { class: 'steps' }, steps.map(([t, d], i) => h('li', null, h('span', { class: 'step-n' }, i + 1), h('div', null, h('b', null, t), h('span', null, d)))))),
-        h('section', { class: 'land-cta' }, h('h2', null, 'Собери команду в одном месте'), h('a', { class: 'btn big', href: '#/register' }, 'Создать пространство')),
+        h('section', { class: 'land-cta' }, h('h2', null, 'Собери команду в одном месте'), h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Создать пространство')),
       ),
     );
   }
@@ -805,7 +807,7 @@
         logoEl(),
         h('div', { class: 'tag' }, mode === 'register' ? 'Создай аккаунт и первое пространство' : 'Войди в свой кабинет'),
         h('div', { class: 'card' }, tabs, form),
-        h('a', { class: 'auth-back', href: '#/' }, '← О сервисе'),
+        h('a', { class: 'auth-back', href: '/' }, '← О сервисе'),
       ),
     );
   }
@@ -2494,11 +2496,11 @@
     void app.offsetWidth;
     app.classList.add('page-enter');
     const hash = location.hash || '#/';
-    if (state.user && hash === '#/about') return viewLanding();
+    if (!IN_PANEL) return viewLanding();
     if (!state.user) {
       if (hash === '#/login') return viewAuth('login');
       if (hash === '#/register') return viewAuth('register');
-      return /^#\/(w|p)\//.test(hash) ? viewAuth('login') : viewLanding();
+      return viewAuth(hash === '#/register' ? 'register' : 'login');
     }
     if (hash === '#/login' || hash === '#/register') {
       location.hash = '#/';
@@ -2528,6 +2530,6 @@
   })();
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
   }
 })();
