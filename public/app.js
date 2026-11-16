@@ -194,6 +194,7 @@
 
   const ICONS = {
     menu: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>',
+    spark: '<svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M10 1.8 11.9 7l5.3 1.9-5.3 1.9L10 16.2 8.1 10.8 2.8 8.9 8.1 7zM16 13.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>',
     mail: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="4.5" width="15" height="11" rx="2.5"/><path d="m3.5 6 6.5 5 6.5-5" stroke-linecap="round"/></svg>',
     home: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 9 10 3.5 16.5 9v7a1 1 0 0 1-1 1h-3.5v-5h-4v5H4.5a1 1 0 0 1-1-1z"/></svg>',
     folder: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2.5 6a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.8H16A1.5 1.5 0 0 1 17.5 7.8v6.7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
@@ -291,6 +292,58 @@
     const t = fmtClock(elapsedSec());
     document.querySelectorAll('.timer-pill .clock, .timer-live').forEach((el) => (el.textContent = t));
   }, 1000);
+
+  // ---------- боковая панель ai (доступна на любой странице) ----------
+
+  const aiOpenStore = store('tq_ai_open', '');
+  const lastWsStore = store('tq_ws', '');
+  const aiCtx = { workspaceId: '', projectId: '' };
+  let aiDock = null;
+  let aiLabelEl = null;
+  let aiChatObj = null;
+
+  function setAiContext(workspaceId, projectId, label) {
+    if (workspaceId) lastWsStore.set(workspaceId);
+    aiCtx.workspaceId = workspaceId || lastWsStore.get() || '';
+    aiCtx.projectId = projectId || '';
+    aiCtx.label = label || (aiCtx.workspaceId ? 'последнее пространство' : 'нет пространства');
+    if (aiLabelEl) aiLabelEl.textContent = aiCtx.label;
+  }
+
+  function buildDock() {
+    aiChatObj = aiChat(aiCtx, { compact: true });
+    aiLabelEl = h('span', { class: 'mail-sub' }, aiCtx.label || (aiCtx.workspaceId ? 'последнее пространство' : 'нет пространства'));
+    aiDock = h(
+      'aside',
+      { class: 'ai-dock', 'aria-label': 'AI tasqly' },
+      h(
+        'div',
+        { class: 'ai-dock-head' },
+        h('span', { class: 'avatar ai-avatar' }, 'AI'),
+        h('div', { class: 'ai-dock-title' }, h('b', null, 'AI tasqly'), aiLabelEl),
+        h('button', { class: 'icon-btn', title: 'Новый разговор', 'aria-label': 'Новый разговор', onclick: () => aiChatObj.reset() }, '✎'),
+        h('button', { class: 'icon-btn', title: 'Закрыть', 'aria-label': 'Закрыть панель AI', onclick: () => toggleDock(false) }, '✕'),
+      ),
+      aiChatObj.el,
+    );
+    document.body.append(aiDock);
+  }
+
+  function toggleDock(force) {
+    const open = force === undefined ? !document.body.classList.contains('ai-open') : force;
+    if (open && !state.user) return;
+    if (open && !aiDock) buildDock();
+    document.body.classList.toggle('ai-open', open);
+    aiOpenStore.set(open ? '1' : '');
+    document.querySelectorAll('.ai-btn').forEach((b) => b.setAttribute('aria-pressed', String(open)));
+    if (open) setTimeout(() => aiChatObj && aiChatObj.input.focus(), 250);
+  }
+
+  function destroyDock() {
+    document.body.classList.remove('ai-open');
+    if (aiDock) aiDock.remove();
+    aiDock = aiLabelEl = aiChatObj = null;
+  }
 
   // ---------- левая панель ----------
 
@@ -442,6 +495,9 @@
       if (state.timerLoaded) queueMicrotask(paintTimer);
       else refreshTimer();
     }
+    const aiBtn = state.user
+      ? h('button', { class: 'ai-btn', title: 'AI tasqly', 'aria-label': 'Открыть AI', 'aria-pressed': String(document.body.classList.contains('ai-open')), onclick: () => toggleDock() }, icon('spark'), h('span', null, 'AI'))
+      : null;
     const profile = state.user
       ? h('button', { class: 'profile-btn', title: state.user.name, 'aria-label': 'Профиль', onclick: (e) => openProfile(e.currentTarget) }, avatar(state.user.name))
       : null;
@@ -452,6 +508,7 @@
       h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly')),
       h('nav', { class: 'crumbs' }, crumbs.map((c) => [h('span', null, '/'), c.href ? h('a', { href: c.href }, c.label) : h('span', { class: 'current' }, c.label)])),
       h('div', { class: 'timer-slot' }),
+      aiBtn,
       mail,
       profile,
     );
@@ -471,6 +528,8 @@
     state.user = null;
     state.timer = null;
     state.timerLoaded = false;
+    destroyDock();
+    lastWsStore.set('');
     location.hash = '#/';
     route();
   }
@@ -479,6 +538,7 @@
 
   function viewAuth() {
     document.title = 'tasqly';
+    destroyDock();
     let mode = 'login';
     const error = h('div', { class: 'error' });
     const form = h('form', { novalidate: true });
@@ -535,6 +595,7 @@
     document.title = 'tasqly';
     render(topbar([{ label: 'Пространства' }]), h('div', { class: 'container' }, h('div', { class: 'empty' }, 'Загрузка…')));
     const { workspaces } = await api.get('/api/workspaces');
+    if (workspaces.length && !workspaces.some((w) => w.id === lastWsStore.get())) setAiContext(workspaces[0].id, '', `пространство «${workspaces[0].name}»`);
 
     const nameInput = h('input', { type: 'text', placeholder: 'Название пространства', maxlength: 80 });
     const codeInput = h('input', { type: 'text', placeholder: 'Код приглашения', maxlength: 20 });
@@ -600,6 +661,7 @@
     const data = await api.get(`/api/workspaces/${id}`);
     const { workspace } = data;
     document.title = `${workspace.name} · tasqly`;
+    setAiContext(id, '', `пространство «${workspace.name}»`);
     const panel = { projects: panelProjects, notes: panelNotes, time: panelTime, chat: panelChat, files: panelFiles, ai: panelAI }[tab](id, data);
 
     render(
@@ -893,9 +955,9 @@
 
   // ---------- ai tasqly ----------
 
-  function panelAI(id, { projects }) {
+  // чат с ai: общий для вкладки и боковой панели. ctx = { workspaceId, projectId } меняется на лету
+  function aiChat(ctx, { compact = false } = {}) {
     const history = [];
-    let projectId = '';
     const list = h('div', { class: 'chat-list' });
     const note = h('div', { class: 'ai-left' });
     const todayStr = () => isoOf(new Date());
@@ -907,20 +969,21 @@
       return el;
     };
     const hello = () =>
-      list.replaceChildren(h('div', { class: 'ai-hello' }, h('b', null, 'AI tasqly'), h('span', null, 'Спроси про проекты и задачи пространства: итоги, что горит, план на день. Могу превратить текст в задачи и разбить задачу на подзадачи в её окне.')));
+      list.replaceChildren(h('div', { class: 'ai-hello' }, h('b', null, 'AI tasqly'), h('span', null, 'Спроси про проекты и задачи: итоги, что горит, план на день. Могу превратить текст в задачи и разбить задачу на подзадачи в её окне.')));
     hello();
 
     let busy = false;
     async function ask(text) {
       text = text.trim();
       if (!text || busy) return;
+      if (!ctx.workspaceId) return toast('Сначала открой или создай пространство');
       busy = true;
       if (list.querySelector('.ai-hello')) list.replaceChildren();
       bubble('user', text);
       const wait = bubble('assistant', 'Думаю…');
       wait.classList.add('pending');
       try {
-        const r = await api.post(`/api/workspaces/${id}/ai/chat`, { message: text, today: todayStr(), history, project_id: projectId || undefined });
+        const r = await api.post(`/api/workspaces/${ctx.workspaceId}/ai/chat`, { message: text, today: todayStr(), history, project_id: ctx.projectId || undefined });
         history.push({ role: 'user', content: text }, { role: 'assistant', content: r.reply });
         wait.querySelector('.text').textContent = r.reply;
         wait.classList.remove('pending');
@@ -935,12 +998,11 @@
       }
     }
 
-    const projSel = h('select', { 'aria-label': 'Проект', onchange: () => (projectId = projSel.value) }, h('option', { value: '' }, 'Все проекты'), projects.map((p) => h('option', { value: p.id }, p.name)));
     const chips = [
-      ['Итоги по проекту', 'Сделай краткие итоги: что сделано, что в работе, что отстаёт.'],
+      ['Итоги', 'Сделай краткие итоги: что сделано, что в работе, что отстаёт.'],
       ['Что горит', 'Какие задачи просрочены или горят в ближайшие дни? Перечисли с исполнителями.'],
       ['План на сегодня', 'Составь для меня план на сегодня по приоритетам и срокам.'],
-      ['Кто перегружен', 'Как распределена нагрузка между участниками? Есть ли перекосы?'],
+      ['Нагрузка', 'Как распределена нагрузка между участниками? Есть ли перекосы?'],
     ];
     const input = h('textarea', { rows: 1, placeholder: 'Спроси про задачи (Enter отправляет)', maxlength: 1500, 'aria-label': 'Запрос к AI' });
     const send = () => {
@@ -954,6 +1016,25 @@
         send();
       }
     });
+    const el = h('div', { class: `chat${compact ? ' compact' : ''}` }, list, h('div', { class: 'chips' }, chips.map(([label, q]) => h('button', { class: 'chip-btn', onclick: () => ask(q) }, label))), h('div', { class: 'chat-input' }, input, h('button', { class: 'btn', onclick: send }, 'Спросить')));
+    return {
+      el,
+      note,
+      input,
+      reset() {
+        history.length = 0;
+        note.textContent = '';
+        hello();
+      },
+    };
+  }
+
+  function panelAI(id, { projects }) {
+    const ctx = { workspaceId: id, projectId: '' };
+    const chat = aiChat(ctx);
+    const projSel = h('select', { 'aria-label': 'Проект', onchange: () => (ctx.projectId = projSel.value) }, h('option', { value: '' }, 'Все проекты'), projects.map((p) => h('option', { value: p.id }, p.name)));
+    const note = chat.note;
+    const todayStr = () => isoOf(new Date());
 
     // задачи из текста
     const textArea = h('textarea', { rows: 5, placeholder: 'Вставь заметки со встречи, переписку или список дел, а AI предложит задачи', maxlength: 4000 });
@@ -1005,12 +1086,7 @@
     return h(
       'div',
       { class: 'ai-wrap' },
-      h(
-        'div',
-        { class: 'ai-main' },
-        h('div', { class: 'ai-bar' }, h('span', { class: 'mail-sub' }, 'Контекст:'), projSel, h('span', { class: 'grow' }), note),
-        h('div', { class: 'chat' }, list, h('div', { class: 'chips' }, chips.map(([label, q]) => h('button', { class: 'chip-btn', onclick: () => ask(q) }, label))), h('div', { class: 'chat-input' }, input, h('button', { class: 'btn', onclick: send }, 'Спросить'))),
-      ),
+      h('div', { class: 'ai-main' }, h('div', { class: 'ai-bar' }, h('span', { class: 'mail-sub' }, 'Контекст:'), projSel, h('span', { class: 'grow' }), note), chat.el),
       h('aside', { class: 'ai-side' }, h('div', { class: 'card' }, h('h2', null, 'Задачи из текста'), textArea, h('div', { style: 'margin-top:8px' }, extractBtn), proposals)),
     );
   }
@@ -1126,6 +1202,7 @@
   async function viewProject(id) {
     const S = await api.get(`/api/projects/${id}`);
     document.title = `${S.project.name} · tasqly`;
+    setAiContext(S.project.workspace_id, id, `проект «${S.project.name}»`);
 
     const F = { q: '', assignee: '', label: '', priority: '', late: false };
     let view = ['board', 'list', 'calendar'].includes(viewStore.get()) ? viewStore.get() : 'board';
@@ -2098,6 +2175,7 @@
       if (kind === 'w') await viewWorkspace(id, tab);
       else if (kind === 'p') await viewProject(id);
       else await viewHome();
+      if (aiOpenStore.get() && !document.body.classList.contains('ai-open')) toggleDock(true);
     } catch (e) {
       if (!state.user) return;
       render(topbar([{ label: 'Ошибка' }]), h('div', { class: 'container' }, h('div', { class: 'card empty' }, e.message, h('div', { class: 'spacer' }), h('a', { class: 'btn', href: '#/' }, 'На главную'))));
