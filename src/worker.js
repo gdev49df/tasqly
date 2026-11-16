@@ -99,7 +99,7 @@ async function currentUser(req, env) {
   const token = getToken(req);
   if (!token) return null;
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.email, u.name, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )
     .bind(await sha256(token), now())
@@ -361,6 +361,26 @@ route(
 );
 
 route('GET', '/api/me', async ({ user }) => json({ user }));
+
+// профиль: имя, использование ai за сегодня, выход на других устройствах
+route('PATCH', '/api/me', async ({ env, user, body }) => {
+  const name = cleanString(body.name, 'имя', { max: 60 });
+  await env.DB.prepare('UPDATE users SET name = ? WHERE id = ?').bind(name, user.id).run();
+  return json({ user: { ...user, name } });
+});
+
+route('GET', '/api/me/usage', async ({ env, user }) => {
+  const day = new Date().toISOString().slice(0, 10);
+  const row = await env.DB.prepare('SELECT count FROM ai_usage WHERE user_id = ? AND day = ?').bind(user.id, day).first();
+  const devices = await env.DB.prepare('SELECT COUNT(*) AS c FROM sessions WHERE user_id = ? AND expires_at > ?').bind(user.id, now()).first();
+  return json({ ai_used: row ? row.count : 0, ai_limit: AI_DAILY_LIMIT, devices: devices.c });
+});
+
+route('POST', '/api/auth/logout-others', async ({ env, req, user }) => {
+  const keep = await sha256(getToken(req));
+  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').bind(user.id, keep).run();
+  return json({ ok: true });
+});
 
 // смена пароля: нужен текущий пароль; остальные сессии завершаются
 route('POST', '/api/auth/password', async ({ env, req, user, body }) => {

@@ -600,6 +600,7 @@
     closeInbox();
     openMenu(anchor, [
       { label: state.user.name, disabled: true, onClick() {} },
+      { label: 'Мой профиль', onClick() { location.hash = '#/profile'; } },
       '-',
       {
         label: `Тема: ${names[themeStore.get()]}`,
@@ -1360,6 +1361,72 @@
           h('div', { class: 'home-act' }, h('div', { class: 'act-ic' }, '+'), h('div', { class: 'act-body' }, h('h3', null, 'Создать пространство'), h('p', null, 'Для команды, клиента или личных дел.'), h('div', { class: 'row' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Создать')))),
           h('div', { class: 'home-act' }, h('div', { class: 'act-ic key' }, '#'), h('div', { class: 'act-body' }, h('h3', null, 'Вступить по коду'), h('p', null, 'Код приглашения пришлёт владелец пространства.'), h('div', { class: 'row' }, codeInput, h('button', { class: 'btn ghost', onclick: join }, 'Вступить')))),
         ),
+      ),
+    );
+  }
+
+  // ---------- профиль ----------
+
+  async function viewProfile() {
+    document.title = 'Профиль · tasqly';
+    render(topbar([{ label: 'Пространства', href: '#/' }, { label: 'Профиль' }]), h('div', { class: 'container' }, h('div', { class: 'empty' }, 'Загрузка…')));
+    const [{ user }, usage, { workspaces }] = await Promise.all([api.get('/api/me'), api.get('/api/me/usage'), api.get('/api/workspaces')]);
+    state.user = { ...state.user, ...user };
+    const sum = (k) => workspaces.reduce((acc, w) => acc + (w[k] || 0), 0);
+    const since = user.created_at ? new Date(user.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+    const hue = (() => { let hs = 0; for (const ch of user.name) hs = (hs * 31 + ch.codePointAt(0)) >>> 0; return hs; })();
+
+    const nameInput = h('input', { type: 'text', value: user.name, maxlength: 60, 'aria-label': 'Имя' });
+    const saveBtn = h('button', { class: 'btn', disabled: true }, 'Сохранить');
+    nameInput.addEventListener('input', () => { saveBtn.disabled = !nameInput.value.trim() || nameInput.value.trim() === state.user.name; });
+    const saveName = async () => {
+      if (saveBtn.disabled) return;
+      saveBtn.disabled = true;
+      try {
+        const res = await api.patch('/api/me', { name: nameInput.value });
+        state.user.name = res.user.name;
+        toast('Имя сохранено');
+        viewProfile();
+      } catch (e) { toast(e.message); saveBtn.disabled = false; }
+    };
+    saveBtn.addEventListener('click', saveName);
+    nameInput.addEventListener('keydown', (e) => e.key === 'Enter' && saveName());
+
+    const themes = [['light', 'Светлая'], ['dark', 'Тёмная'], ['auto', 'Как в системе']];
+    const themeSeg = h('div', { class: 'seg prof-theme' });
+    const paintTheme = () => themeSeg.replaceChildren(...themes.map(([k, label]) =>
+      h('button', { class: k === themeStore.get() ? 'active' : '', onclick: (e) => { setTheme(k, e.currentTarget); paintTheme(); } }, label)));
+    paintTheme();
+
+    const pct = Math.min(100, Math.round((usage.ai_used / usage.ai_limit) * 100));
+    const row = (title, text, action) => h('div', { class: 'prof-row' }, h('div', null, h('b', null, title), text ? h('span', null, text) : null), action);
+    const tile = (n, t) => h('div', { class: 'home-stat' }, h('b', null, String(n)), h('span', null, t));
+    const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
+
+    const othersBtn = h('button', { class: 'btn ghost small', disabled: usage.devices <= 1, onclick: async () => {
+      try { await api.post('/api/auth/logout-others'); toast('Остальные устройства вышли'); viewProfile(); } catch (e) { toast(e.message); }
+    } }, 'Выйти на других');
+
+    render(
+      topbar([{ label: 'Пространства', href: '#/' }, { label: 'Профиль' }]),
+      h('div', { class: 'container prof' },
+        h('div', { class: 'prof-hero' },
+          h('span', { class: 'prof-ava', style: `background:${AVATAR_COLORS[hue % AVATAR_COLORS.length]}` }, user.name.trim().charAt(0).toUpperCase()),
+          h('div', { class: 'prof-id' },
+            h('div', { class: 'prof-edit' }, nameInput, saveBtn),
+            h('div', { class: 'prof-mail' }, user.email),
+            since ? h('div', { class: 'prof-since' }, `В tasqly с ${since}`) : null)),
+        h('div', { class: 'home-stats' }, tile(workspaces.length, plural(workspaces.length, 'пространство', 'пространства', 'пространств')), tile(sum('projects'), plural(sum('projects'), 'проект', 'проекта', 'проектов')), tile(sum('my_open'), plural(sum('my_open'), 'моя открытая задача', 'моих открытых задачи', 'моих открытых задач'))),
+        h('div', { class: 'prof-card' },
+          h('h2', null, 'AI на сегодня'),
+          h('div', { class: 'prof-ai' }, h('b', null, `${usage.ai_used} из ${usage.ai_limit}`), h('span', null, 'запросов использовано, счётчик обнуляется каждый день')),
+          h('div', { class: 'progress' }, h('span', { style: `width:${pct}%` }))),
+        h('div', { class: 'prof-card' }, h('h2', null, 'Внешний вид'), row('Тема', 'Светлая, тёмная или как в системе', themeSeg)),
+        h('div', { class: 'prof-card' },
+          h('h2', null, 'Безопасность'),
+          row('Пароль', 'Минимум 8 символов', h('button', { class: 'btn ghost small', onclick: openPasswordModal }, 'Сменить')),
+          row('Устройства', `${usage.devices} ${plural(usage.devices, 'активная сессия', 'активные сессии', 'активных сессий')}`, othersBtn)),
+        h('div', { class: 'prof-card' }, row('Выйти из аккаунта', 'На этом устройстве', h('button', { class: 'btn danger small', onclick: logout }, 'Выйти'))),
       ),
     );
   }
@@ -3032,6 +3099,9 @@
     if (hash === '#/login' || hash === '#/register') {
       location.hash = '#/';
       return;
+    }
+    if (hash === '#/profile') {
+      try { return await viewProfile(); } catch (e) { return render(topbar([{ label: 'Ошибка' }]), h('div', { class: 'container' }, h('div', { class: 'card empty' }, e.message))); }
     }
     const [, kind, id, tab] = hash.match(/^#\/(?:(w|p)\/([\w-]+)(?:\/(\w+))?)?$/) || [];
     try {
