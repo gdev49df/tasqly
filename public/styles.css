@@ -1718,3 +1718,9 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .act-body .row input { flex: 1; min-width: 0; }
 @media (max-width: 600px) { .home-act { flex-direction: column; } .ws-grid { grid-template-columns: 1fr; } }
 .home-h2 { color: var(--text); }
+
+/* v8.4: кнопки шапки — один квадратный стиль (радиус 10px, высота 36px) */
+.topbar .track-btn, .topbar .ai-btn { height: 36px; border-radius: 10px; }
+.topbar .ai-btn { border: 1px solid var(--border); }
+@media (max-width: 860px) { .topbar .track-btn { width: 36px; } }
+.timer-pill { border-radius: 10px; }
