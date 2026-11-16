@@ -807,6 +807,8 @@ select, input, textarea { transition: border-color 0.15s, box-shadow 0.15s, back
 .land { width: 100%; }
 .land-nav { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 10px; height: 56px; padding: env(safe-area-inset-top) max(16px, calc((100% - 1120px) / 2)) 0; box-sizing: content-box; background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: saturate(1.8) blur(20px); -webkit-backdrop-filter: saturate(1.8) blur(20px); border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
 .land-nav .logo { font-size: 19px; margin-right: 14px; }
+.land-nav { gap: 6px; }
+.land-nav .grow { flex: 1; }
 .land-nav .logo-mark { width: 32px; height: 32px; }
 .land-links { display: flex; gap: 2px; }
 .land-links button { border: 0; background: transparent; color: var(--muted); padding: 7px 12px; border-radius: 8px; font-weight: 500; transition: color 0.12s, background 0.12s; }
@@ -895,3 +897,17 @@ a.btn:hover { text-decoration: none; }
 .role-list li::before { content: '✓'; position: absolute; left: 16px; color: var(--accent); font-weight: 700; }
 .ftab-text { max-width: 640px; color: var(--muted); font-size: 16px; line-height: 1.6; margin: 0 0 18px; animation: tq-fade .3s var(--ease-out); }
 @media (prefers-reduced-motion: reduce) { .role-list li, .ftab-text { animation: none; } }
+
+/* лендинг: шапка как у крупных продуктов */
+.land-links button.nav-dd { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 15px; }
+.nav-dd .chev { display: inline-flex; color: var(--muted); transition: transform .2s var(--ease-out); }
+.nav-dd[aria-expanded='true'] .chev, .nav-dd:hover .chev { transform: translateY(1px); color: var(--text); }
+.land-links button { color: var(--text); font-size: 15px; }
+.nav-sep { width: 1px; height: 24px; background: var(--border); margin: 0 10px; }
+.nav-link { padding: 7px 12px; border-radius: 8px; color: var(--text); font-weight: 500; font-size: 15px; }
+.nav-link:hover { background: var(--hover); text-decoration: none; }
+.nav-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; margin: 0 6px; border: 0; border-radius: 10px; background: var(--hover); color: var(--text); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; }
+.chip-dot { width: 14px; height: 14px; border-radius: 50%; border: 1.6px solid currentColor; background: linear-gradient(90deg, currentColor 50%, transparent 50%); opacity: .75; }
+.nav-cta { padding: 9px 16px; border-radius: 10px; font-size: 15px; }
+@media (max-width: 900px) { .nav-sep, .nav-reg, .nav-chip { display: none; } }
+@media (max-width: 720px) { .land-links { display: none; } }

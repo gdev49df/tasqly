@@ -633,6 +633,27 @@
     };
     const logo = logoEl();
 
+    const chev = () => { const sp = h('span', { class: 'chev', 'aria-hidden': 'true' }); sp.innerHTML = '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>'; return sp; };
+    const dd = (label, items) => h('button', { class: 'nav-dd', 'aria-haspopup': 'menu', onclick: (e) => openMenu(e.currentTarget, items.map(([t, id]) => ({ label: t, onClick: to(id) }))) }, label, chev());
+    const themeNames = { auto: 'Авто', light: 'Светлая', dark: 'Тёмная' };
+    const themeChip = h('button', { class: 'nav-chip', 'aria-label': 'Сменить тему', onclick: () => {
+      const order = ['auto', 'light', 'dark'];
+      const next = order[(order.indexOf(themeStore.get()) + 1) % order.length];
+      themeStore.set(next); applyTheme(next); themeChip.querySelector('span').textContent = themeNames[next];
+    } }, h('i', { class: 'chip-dot' }), h('span', null, themeNames[themeStore.get()]));
+    function landNav() {
+      return h(
+        'header',
+        { class: 'land-nav' },
+        logo,
+        h('span', { class: 'grow' }),
+        h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'features'], ['Учёт времени', 'features'], ['AI tasqly', 'features']]), dd('Проекты', [['Базовый', 'kinds'], ['Продвинутый', 'kinds'], ['IT', 'kinds']]), h('button', { onclick: to('steps') }, 'Как начать')),
+        ...(state.user
+          ? [h('a', { class: 'btn small', href: '#/' }, 'Кабинет')]
+          : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '#/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: '#/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: '#/register' }, 'Начать сейчас')]),
+      );
+    }
+
     // демо-доска: одна карточка сама переезжает в «Готово»
     const demoCard = (title, extra = [], cls = '') => h('div', { class: `demo-card ${cls}` }, h('div', { class: 'demo-title' }, title), h('div', { class: 'demo-meta' }, extra));
     const demo = h(
@@ -703,7 +724,7 @@
       h(
         'div',
         { class: 'land' },
-        h('header', { class: 'land-nav' }, logo, h('nav', { class: 'land-links' }, h('button', { onclick: to('features') }, 'Возможности'), h('button', { onclick: to('kinds') }, 'Проекты'), h('button', { onclick: to('steps') }, 'Как начать')), h('span', { class: 'grow' }), ...(state.user ? [h('a', { class: 'btn small', href: '#/' }, 'Кабинет')] : [h('a', { class: 'btn ghost small', href: '#/login' }, 'Войти'), h('a', { class: 'btn small', href: '#/register' }, 'Начать сейчас')])),
+        landNav(),
         h(
           'section',
           { class: 'hero' },
