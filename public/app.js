@@ -335,6 +335,7 @@
         h('span', { class: 'avatar ai-avatar' }, 'AI'),
         h('div', { class: 'ai-dock-title' }, h('b', null, 'AI tasqly'), aiLabelEl),
         h('button', { class: 'icon-btn', title: 'Новый разговор', 'aria-label': 'Новый разговор', onclick: () => aiChatObj.reset() }, '✎'),
+        h('button', { class: 'icon-btn', title: 'На весь экран', 'aria-label': 'На весь экран', onclick: () => document.body.classList.toggle('ai-full') }, '⤢'),
         h('button', { class: 'icon-btn', title: 'Закрыть', 'aria-label': 'Закрыть панель AI', onclick: () => toggleDock(false) }, '✕'),
       ),
       aiChatObj.el,
@@ -342,7 +343,8 @@
     document.body.append(aiDock);
   }
 
-  function toggleDock(force) {
+  function toggleDock(force, full) {
+    document.body.classList.toggle('ai-full', !!full && force !== false);
     const open = force === undefined ? !document.body.classList.contains('ai-open') : force;
     if (open && !state.user) return;
     if (open && !aiDock) buildDock();
@@ -353,7 +355,7 @@
   }
 
   function destroyDock() {
-    document.body.classList.remove('ai-open');
+    document.body.classList.remove('ai-open', 'ai-full');
     if (aiDock) aiDock.remove();
     aiDock = aiLabelEl = aiChatObj = null;
   }
@@ -439,7 +441,8 @@
     const list = h('div', { class: 'drawer-list' }, h('div', { class: 'drawer-note' }, 'Загрузка…'));
     const close = () => {
       wrap.classList.remove('open');
-      setTimeout(() => wrap.remove(), 220);
+      wrap.classList.add('closing');
+      setTimeout(() => wrap.remove(), 420);
     };
     const go = (href) => () => {
       close();
@@ -455,7 +458,8 @@
         { class: 'drawer', role: 'dialog', 'aria-label': 'Меню' },
         h('div', { class: 'drawer-head' }, logoEl({ onclick: close }), h('button', { class: 'icon-btn', 'aria-label': 'Закрыть меню', onclick: close }, '✕')),
         h('button', { class: 'drawer-item', onclick: go('#/') }, icon('home'), 'Кабинет'),
-        h('button', { class: 'drawer-item', onclick: go('/') }, icon('spark'), 'О tasqly'),
+        h('button', { class: 'drawer-item', onclick: () => { close(); toggleDock(true, true); } }, icon('spark'), 'AI tasqly'),
+        h('button', { class: 'drawer-item', onclick: go('/') }, icon('home'), 'О tasqly'),
         h('button', { class: 'drawer-item', onclick: () => (close(), openInbox(document.querySelector('.mail-btn'))) }, icon('mail'), 'Входящие'),
         h('div', { class: 'drawer-title' }, 'Пространства'),
         list,
