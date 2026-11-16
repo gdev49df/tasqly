@@ -1296,6 +1296,28 @@ route('POST', '/api/workspaces/:id/ai/chat', async ({ env, user, params, body })
   return json({ reply: reply.includes('```') ? AI_REFUSAL : reply, left });
 });
 
+// голос в текст: запись до ~60 секунд, base64 в json
+route('POST', '/api/workspaces/:id/ai/transcribe', async ({ env, user, params, body }) => {
+  await requireMember(env, params.id, user.id);
+  if (typeof body.audio !== 'string' || !body.audio) fail(400, 'нет записи');
+  if (body.audio.length > 2_500_000) fail(413, 'запись слишком длинная, до минуты');
+  if (!/^[A-Za-z0-9+/=]+$/.test(body.audio)) fail(400, 'некорректная запись');
+  const left = await takeAiQuota(env, user.id);
+  let text;
+  if (env.AI_MOCK) text = 'Подготовить отчёт до пятницы и позвонить клиенту';
+  else {
+    if (!env.AI) fail(503, 'ai пока не подключён к этому серверу');
+    try {
+      const out = await env.AI.run('@cf/openai/whisper-large-v3-turbo', { audio: body.audio, language: 'ru' });
+      text = out && typeof out.text === 'string' ? out.text.replace(CJK, '').trim() : '';
+    } catch {
+      fail(502, 'не удалось расшифровать запись, попробуй ещё раз');
+    }
+  }
+  if (!text) fail(422, 'речь не распознана, попробуй говорить ближе к микрофону');
+  return json({ text: text.slice(0, 4000), left });
+});
+
 route('POST', '/api/workspaces/:id/ai/tasks', async ({ env, user, params, body }) => {
   await requireMember(env, params.id, user.id);
   const text = cleanString(body.text, 'текст', { max: 4000 });

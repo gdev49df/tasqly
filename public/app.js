@@ -2017,6 +2017,44 @@
     // задачи из текста
     const textArea = h('textarea', { rows: 5, placeholder: 'Вставь заметки со встречи, переписку или список дел, а AI предложит задачи', maxlength: 4000 });
     const proposals = h('div', { class: 'ai-props' });
+    // голос: запись с микрофона, расшифровка на сервере
+    const micBtn = h('button', { class: 'btn ghost small mic-btn', type: 'button', 'aria-label': 'Надиктовать голосом' }, h('span', { class: 'mic-dot' }), h('span', { class: 'mic-text' }, 'Голосом'));
+    let rec = null;
+    let recTimer = 0;
+    const micIdle = () => { micBtn.classList.remove('rec'); micBtn.disabled = false; micBtn.querySelector('.mic-text').textContent = 'Голосом'; };
+    micBtn.addEventListener('click', async () => {
+      if (rec) { rec.stop(); return; }
+      if (!navigator.mediaDevices || !window.MediaRecorder) return toast('Браузер не поддерживает запись голоса');
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return toast('Нет доступа к микрофону'); }
+      const chunks = [];
+      rec = new MediaRecorder(stream);
+      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      rec.onstop = async () => {
+        clearTimeout(recTimer);
+        stream.getTracks().forEach((t) => t.stop());
+        rec = null;
+        micBtn.classList.remove('rec');
+        micBtn.disabled = true;
+        micBtn.querySelector('.mic-text').textContent = 'Расшифровываю…';
+        try {
+          const blob = new Blob(chunks, { type: chunks[0] ? chunks[0].type : 'audio/webm' });
+          const b64 = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1] || ''); fr.onerror = no; fr.readAsDataURL(blob); });
+          const r = await api.post(`/api/workspaces/${id}/ai/transcribe`, { audio: b64 });
+          textArea.value = (textArea.value ? textArea.value.trim() + '\n' : '') + r.text;
+          note.textContent = `Осталось запросов сегодня: ${r.left}`;
+          textArea.focus();
+        } catch (e) {
+          toast(e.message);
+        } finally {
+          micIdle();
+        }
+      };
+      rec.start();
+      micBtn.classList.add('rec');
+      micBtn.querySelector('.mic-text').textContent = 'Остановить';
+      recTimer = setTimeout(() => rec && rec.stop(), 55000);
+    });
     const targetSel = h('select', { 'aria-label': 'В какой проект' }, projects.map((p) => h('option', { value: p.id }, p.name)));
     const extractBtn = h('button', { class: 'btn small' }, 'Предложить задачи');
     extractBtn.addEventListener('click', async () => {
@@ -2065,7 +2103,7 @@
       'div',
       { class: 'ai-wrap' },
       h('div', { class: 'ai-main' }, h('div', { class: 'ai-bar' }, h('span', { class: 'mail-sub' }, 'Контекст:'), projSel, h('span', { class: 'grow' }), note), chat.el),
-      h('aside', { class: 'ai-side' }, h('div', { class: 'card' }, h('h2', null, 'Задачи из текста'), textArea, h('div', { style: 'margin-top:8px' }, extractBtn), proposals)),
+      h('aside', { class: 'ai-side' }, h('div', { class: 'card' }, h('h2', null, 'Задачи из текста'), textArea, h('div', { class: 'row', style: 'margin-top:8px;gap:8px' }, extractBtn, micBtn), proposals)),
     );
   }
 

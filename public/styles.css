@@ -1792,3 +1792,11 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .trial-list li { position: relative; padding-left: 26px; font-size: 14px; }
 .trial-list li::before { content: ''; position: absolute; left: 0; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 .trial-list li::after { content: ''; position: absolute; left: 5px; top: 6px; width: 6px; height: 3px; border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(-45deg); }
+
+/* v9.1 голосовая запись */
+.mic-btn { display: inline-flex; align-items: center; gap: 7px; }
+.mic-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: background .15s; }
+.mic-btn.rec { color: #d92d20; border-color: #d92d20; }
+.mic-btn.rec .mic-dot { background: #d92d20; animation: mic-pulse 1s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { transform: scale(1.5); opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .mic-btn.rec .mic-dot { animation: none; } }

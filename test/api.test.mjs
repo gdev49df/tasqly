@@ -442,6 +442,19 @@ assert.equal((await outsider('GET', '/api/me')).status, 200);
 assert.equal((await evePc('GET', '/api/me')).status, 401);
 assert.equal((await client()('POST', '/api/auth/login', { email: `eve${run}@test.dev`, password: 'password123' })).status, 401);
 assert.equal((await client()('POST', '/api/auth/login', { email: `eve${run}@test.dev`, password: 'newpassword1' })).status, 200);
+{
+  const w = (await alice('POST', '/api/workspaces', { name: 'голос' })).data.workspace;
+  r = await alice('POST', `/api/workspaces/${w.id}/ai/transcribe`, {});
+  assert.equal(r.status, 400);
+  r = await alice('POST', `/api/workspaces/${w.id}/ai/transcribe`, { audio: 'не base64!' });
+  assert.equal(r.status, 400);
+  r = await alice('POST', `/api/workspaces/${w.id}/ai/transcribe`, { audio: 'AAAA' });
+  assert.equal(r.status, 200);
+  assert.ok(r.data.text.length > 0);
+  r = await bob('POST', `/api/workspaces/${w.id}/ai/transcribe`, { audio: 'AAAA' });
+  assert.equal(r.status, 404);
+}
+ok('голос: расшифровка записи, проверки и права');
 ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
 
 // лимиты на количество объектов
