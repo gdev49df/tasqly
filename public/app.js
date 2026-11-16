@@ -882,7 +882,7 @@
         h('span', { class: 'grow' }),
         h('nav', { class: 'land-links' }, dd('Возможности', [['Задачи и доски', 'roles'], ['Учёт времени', 'sc-time'], ['AI tasqly', 'ai']]), dd('Проекты', [['Базовый', 'kind-basic'], ['Продвинутый', 'kind-advanced'], ['IT', 'kind-it']]), h('button', { onclick: to('steps') }, 'Как начать'), h('button', { onclick: to('pricing') }, 'Тарифы')),
         ...(state.user
-          ? [h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет')]
+          ? [themeChip, h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет')]
           : [h('span', { class: 'nav-sep' }), h('a', { class: 'nav-link', href: '/login' }, 'Войти'), h('a', { class: 'nav-link nav-reg', href: '/register' }, 'Регистрация'), themeChip, h('a', { class: 'btn small nav-cta', href: PANEL + '#/register' }, 'Начать сейчас')]),
       );
     }
