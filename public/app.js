@@ -2990,6 +2990,111 @@
     window.addEventListener('scroll', () => { if (!raf) { cur = window.scrollY; target = cur; } }, { passive: true });
   })();
 
+  // ---------- свои выпадающие списки вместо системных ----------
+  (function customSelects() {
+    const valueDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    const indexDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
+    let pop = null;
+    let popOwner = null;
+    const closePop = () => {
+      if (!pop) return;
+      const el = pop;
+      pop = null;
+      if (popOwner) popOwner.btn.setAttribute('aria-expanded', 'false');
+      popOwner = null;
+      el.classList.add('out');
+      setTimeout(() => el.remove(), 140);
+      document.removeEventListener('pointerdown', onOutside, true);
+      window.removeEventListener('resize', closePop);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+    const onOutside = (e) => { if (pop && !pop.contains(e.target) && !(popOwner && popOwner.btn.contains(e.target))) closePop(); };
+    const onScroll = (e) => { if (pop && !pop.contains(e.target)) closePop(); };
+
+    function enhance(select) {
+      if (select.dataset.sel || select.multiple || select.hasAttribute('data-native')) return;
+      select.dataset.sel = '1';
+      const btn = h('button', { type: 'button', class: 'sel-btn', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' });
+      const label = select.getAttribute('aria-label');
+      if (label) btn.setAttribute('aria-label', label);
+      const wrap = h('div', { class: 'sel' }, btn);
+      select.before(wrap);
+      select.classList.add('sel-native');
+      select.tabIndex = -1;
+      const owner = { btn, select };
+      const paint = () => {
+        const o = select.options[select.selectedIndex];
+        btn.textContent = o ? o.textContent : '';
+        btn.disabled = select.disabled;
+        btn.classList.toggle('empty', !o || o.value === '');
+      };
+      // значения, выставленные из кода, тоже обновляют подпись
+      Object.defineProperty(select, 'value', { configurable: true, get() { return valueDesc.get.call(this); }, set(v) { valueDesc.set.call(this, v); paint(); } });
+      Object.defineProperty(select, 'selectedIndex', { configurable: true, get() { return indexDesc.get.call(this); }, set(v) { indexDesc.set.call(this, v); paint(); } });
+      new MutationObserver(paint).observe(select, { childList: true, subtree: true, characterData: true, attributes: true });
+      select.addEventListener('change', paint);
+      paint();
+
+      const choose = (i) => {
+        if (i < 0 || i >= select.options.length || select.options[i].disabled) return;
+        const changed = select.selectedIndex !== i;
+        indexDesc.set.call(select, i);
+        paint();
+        closePop();
+        btn.focus();
+        if (changed) { select.dispatchEvent(new Event('input', { bubbles: true })); select.dispatchEvent(new Event('change', { bubbles: true })); }
+      };
+      const open = () => {
+        if (pop && popOwner === owner) return closePop();
+        closePop();
+        const list = h('div', { class: 'sel-pop', role: 'listbox' });
+        let active = Math.max(0, select.selectedIndex);
+        const items = [...select.options].map((o, i) => {
+          const it = h('div', { class: `sel-opt${i === select.selectedIndex ? ' on' : ''}${o.disabled ? ' dis' : ''}`, role: 'option', 'aria-selected': String(i === select.selectedIndex) }, h('span', null, o.textContent), h('i', { class: 'sel-ck', 'aria-hidden': 'true' }, '✓'));
+          it.addEventListener('pointerdown', (e) => e.preventDefault());
+          it.addEventListener('click', () => choose(i));
+          it.addEventListener('pointermove', () => setActive(i, false));
+          return it;
+        });
+        const setActive = (i, scroll = true) => {
+          active = i;
+          items.forEach((it, j) => it.classList.toggle('hot', j === i));
+          if (scroll) items[i].scrollIntoView({ block: 'nearest' });
+        };
+        list.append(...items);
+        document.body.append(list);
+        const r = btn.getBoundingClientRect();
+        list.style.minWidth = `${Math.max(r.width, 160)}px`;
+        const ph = Math.min(list.scrollHeight, 288);
+        const below = window.innerHeight - r.bottom - 12;
+        const up = below < ph && r.top > below;
+        list.style.maxHeight = `${Math.max(120, Math.min(288, up ? r.top - 12 : below))}px`;
+        list.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - list.offsetWidth - 8))}px`;
+        list.style.top = up ? `${Math.max(8, r.top - Math.min(ph, r.top - 12) - 6)}px` : `${r.bottom + 6}px`;
+        list.style.transformOrigin = up ? 'bottom left' : 'top left';
+        pop = list; popOwner = owner;
+        btn.setAttribute('aria-expanded', 'true');
+        setActive(active);
+        document.addEventListener('pointerdown', onOutside, true);
+        window.addEventListener('resize', closePop);
+        window.addEventListener('scroll', onScroll, true);
+        list.__move = (d) => setActive(Math.min(items.length - 1, Math.max(0, active + d)));
+        list.__pick = () => choose(active);
+      };
+      btn.addEventListener('click', open);
+      btn.addEventListener('keydown', (e) => {
+        const isOpen = pop && popOwner === owner;
+        if (e.key === 'Escape' && isOpen) { e.preventDefault(); e.stopPropagation(); closePop(); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (!isOpen) open(); else pop.__move(e.key === 'ArrowDown' ? 1 : -1); }
+        else if ((e.key === 'Enter' || e.key === ' ') && isOpen) { e.preventDefault(); pop.__pick(); }
+        else if (e.key === 'Tab' && isOpen) closePop();
+      });
+    }
+    const scan = (root) => (root.nodeType === 1 ? [...(root.matches('select') ? [root] : []), ...root.querySelectorAll('select')] : []).forEach(enhance);
+    new MutationObserver((muts) => muts.forEach((m) => m.addedNodes.forEach(scan))).observe(document.body, { childList: true, subtree: true });
+    scan(document.body);
+  })();
+
   window.addEventListener('hashchange', route);
 
   (async () => {
