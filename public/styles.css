@@ -869,9 +869,6 @@ a.btn:hover { text-decoration: none; }
 .steps li div { display: flex; flex-direction: column; gap: 4px; }
 .steps b { font-size: 16px; letter-spacing: -0.01em; }
 .steps span:not(.step-n) { color: var(--muted); line-height: 1.55; }
-.land-cta { max-width: 1120px; margin: 72px auto 24px; padding: 48px 20px; text-align: center; border-radius: 20px; background: var(--accent-soft); display: flex; flex-direction: column; align-items: center; gap: 20px; }
-.land-cta h2 { margin: 0; font-size: clamp(24px, 3.4vw, 34px); letter-spacing: -0.03em; font-weight: 650; text-transform: none; color: var(--text); }
-@media (min-width: 1160px) { .land-cta { margin-left: auto; margin-right: auto; } }
 
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; padding-top: 40px; gap: 32px; }

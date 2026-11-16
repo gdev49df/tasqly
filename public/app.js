@@ -1051,7 +1051,6 @@
         ),
         stepsSection,
         pricing,
-        h('section', { class: 'land-cta' }, h('h2', null, 'Собери команду в одном месте'), h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Создать пространство')),
       ),
     );
   }
