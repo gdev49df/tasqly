@@ -1347,3 +1347,15 @@ html, body { overflow-x: clip; max-width: 100%; }
 }
 .sc-ring svg circle:first-child { stroke: color-mix(in srgb, var(--lime) 22%, var(--border)); }
 .sc-ring .ring-txt b { color: var(--text); }
+
+/* v5.3: компактные сообщения и мягкое переключение вкладок */
+.tv-chat p, .tv-ai p { align-self: flex-start; width: fit-content; max-width: min(72%, 300px); }
+.tv-chat p.me, .tv-ai p.me { align-self: flex-end; }
+.ft-view { animation: tv-in .22s var(--ease-out); }
+.tv-chat > *, .tv-ai > * { animation: tv-pop .28s var(--ease-out) both; }
+.tv-chat > :nth-child(2), .tv-ai > :nth-child(2) { animation-delay: .1s; }
+.tv-chat > :nth-child(3), .tv-ai > :nth-child(3) { animation-delay: .2s; }
+.tv-chat > :nth-child(4), .tv-ai > :nth-child(4) { animation-delay: .3s; }
+@keyframes tv-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes tv-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ft-view, .tv-chat > *, .tv-ai > * { animation: none; } }
