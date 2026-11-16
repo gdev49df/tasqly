@@ -1576,3 +1576,62 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .kind-row { transition: box-shadow .5s var(--ease-out), background .5s; border-radius: 14px; }
 .kind-row.flash { animation: kind-flash 1.8s var(--ease-out); }
 @keyframes kind-flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 20%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lime) 70%, transparent); background: color-mix(in srgb, var(--lime) 8%, transparent); } }
+
+/* v7.5: тарифы — заголовок сверху, три крупные карточки, кнопки и ссылка на сравнение */
+.pr { display: block; padding: 48px 40px 36px; }
+.pr-copy { text-align: center; margin: 0 auto 36px; }
+.pr-copy h2 { font-size: clamp(30px, 4vw, 46px); }
+.pr-copy p { margin: 0 auto; max-width: 46ch; font-size: 17px; }
+.pr-cards { gap: 16px; align-items: stretch; }
+.pr-card { padding: 26px 24px 24px; gap: 10px; }
+.pr-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; }
+.pr-badge { position: static; flex: none; }
+.pr-price { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.pr-price b { font-size: 34px; letter-spacing: -0.04em; font-weight: 700; line-height: 1.1; }
+.pr-price small { display: block; font-size: 13px; opacity: .7; font-weight: 400; }
+.pr-card p { min-height: 2.9em; }
+.pr-card ul { margin-bottom: 8px; flex: 1; }
+.pr-go { margin-top: auto; justify-content: center; width: 100%; }
+.pr-1 .pr-go { background: var(--lime-ink); color: var(--lime); border-color: var(--lime-ink); }
+.pr-more { text-align: center; margin-top: 26px; font-size: 15px; font-weight: 600; }
+.pr-more a { text-decoration: underline; text-decoration-color: var(--lime); text-decoration-thickness: 2px; text-underline-offset: 5px; }
+.pr-arrow { display: inline-block; margin-left: 8px; transition: transform .3s var(--ease-out); }
+.pr-more:hover .pr-arrow { transform: translateX(5px); }
+.pg-cards .pr-card { min-height: 0; }
+@media (max-width: 820px) { .pr { padding: 30px 18px 26px; } .pr-cards { grid-template-columns: 1fr; } .pr-card p { min-height: 0; } }
+
+/* v7.6: страница тарифов — шапка, группы сравнения, лимиты, FAQ, финальный призыв */
+.pg-hero { text-align: center; margin: 0 auto 40px; }
+.pg-hero .pg-lead { margin: 0 auto; }
+.pg-cards { margin-bottom: 20px; }
+.pg-cards .pr-card { transition: transform .35s var(--ease-out), border-color .25s; }
+.pg-cards .pr-card:hover { transform: translateY(-6px); }
+.pg-h2 { text-align: center; }
+.cmp thead th { padding: 18px; font-size: 16px; }
+.cmp-g th { text-align: left; background: transparent; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 18px 18px 8px; border-bottom: 0; }
+.cmp tbody:not(:first-of-type) .cmp-g th { border-top: 1px solid var(--border); }
+.cmp tbody tr:not(.cmp-g) { transition: background .2s; }
+.cmp tbody tr:not(.cmp-g):hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.cmp td.yes { color: var(--lime-ink); }
+.cmp td.yes::before { content: ''; display: inline-block; width: 22px; height: 22px; border-radius: 50%; background: var(--lime); vertical-align: middle; margin-right: -22px; }
+.cmp td.yes { font-size: 0; }
+.cmp td.yes::after { content: '✓'; font-size: 13px; position: relative; left: -1px; color: #101300; font-weight: 800; display: inline-block; width: 22px; line-height: 22px; text-align: center; margin-left: 0; }
+.lim { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.lim-i { border: 1px solid var(--border); background: var(--bg-subtle); border-radius: 16px; padding: 20px 22px; display: grid; gap: 4px; }
+.lim-i b { font-size: 34px; letter-spacing: -0.04em; line-height: 1.1; }
+.lim-i span { color: var(--muted); font-size: 14px; }
+.faq { max-width: 760px; margin: 0 auto; display: grid; gap: 10px; }
+.faq-i { border: 1px solid var(--border); border-radius: 14px; background: var(--bg-subtle); transition: border-color .2s; }
+.faq-i[open] { border-color: var(--lime); }
+.faq-i summary { cursor: pointer; list-style: none; padding: 18px 22px; font-weight: 600; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+.faq-i summary::-webkit-details-marker { display: none; }
+.faq-i summary::after { content: '+'; font-size: 22px; line-height: 1; color: var(--muted); transition: transform .3s var(--ease-out); }
+.faq-i[open] summary::after { transform: rotate(45deg); color: var(--text); }
+.faq-i p { margin: 0; padding: 0 22px 20px; color: var(--muted); line-height: 1.6; }
+.pg-cta { margin-top: 64px; text-align: center; padding: 48px 24px; border-radius: 24px; background: var(--lime); color: #101300; }
+.pg-cta h2 { margin: 0 0 8px; font-size: clamp(26px, 4vw, 38px); letter-spacing: -0.04em; }
+.pg-cta p { margin: 0 0 22px; opacity: .75; }
+.pg-cta .btn { background: #101300; color: var(--lime); border-color: #101300; }
+@media (max-width: 820px) { .lim { grid-template-columns: repeat(2, 1fr); } }
+.pg-h2 { color: var(--text); }
+.pg .pg-cta h2 { color: #101300; margin-top: 0; }

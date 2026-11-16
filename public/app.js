@@ -591,6 +591,12 @@
     { name: 'Бизнес', price: 'по запросу', per: '', text: 'Для компаний со своими требованиями.', items: ['Всё из «Команда»', 'Помощь с запуском', 'Приоритетная поддержка', 'Свои условия'] },
   ];
 
+  const planCard = (pl, i, extra = {}) => h('div', Object.assign({ class: `pr-card pr-${i}` }, extra),
+    h('div', { class: 'pr-head' }, h('h3', null, pl.name), pl.badge ? h('span', { class: 'pr-badge' }, pl.badge) : null),
+    h('div', { class: 'pr-price' }, h('b', null, pl.price), pl.per ? h('small', null, pl.per) : null),
+    h('p', null, pl.text),
+    h('ul', null, pl.items.map((t) => h('li', null, t))),
+    h('a', { class: 'btn pr-go', href: i === 2 ? '/contacts' : '/register' }, i === 2 ? 'Связаться' : 'Начать'));
   function logoEl(attrs) {
     return h('a', Object.assign({ class: 'logo', href: IN_PANEL ? '#/' : '/', 'aria-label': 'tasqly' }, attrs), h('span', { class: 'logo-word' }, 'tasqly'));
   }
@@ -1046,8 +1052,9 @@
 
     // ---------- тарифы (названия и цены меняются здесь) ----------
     const pricing = h('section', { class: 'land-sec', id: 'pricing' }, h('div', { class: 'pr' },
-      h('div', { class: 'pr-copy reveal' }, h('h2', null, 'Тарифы под любой бюджет'), h('p', null, 'Начни бесплатно и переходи дальше, когда команда вырастет.'), h('div', { class: 'pr-from' }, h('b', null, `от ${PLANS[1].price}`), h('span', null, ' / мес за человека')), h('a', { class: 'btn big', href: PANEL + '#/register' }, 'Подробнее')),
-      h('div', { class: 'pr-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i} reveal`, style: `transition-delay:${i * 90}ms` }, pl.badge ? h('span', { class: 'pr-badge' }, pl.badge) : null, h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text), h('ul', null, pl.items.map((t) => h('li', null, t)))))),
+      h('div', { class: 'pr-copy reveal' }, h('h2', null, 'Тарифы под любой бюджет'), h('p', null, 'Начни бесплатно и переходи дальше, когда команда вырастет.')),
+      h('div', { class: 'pr-cards' }, PLANS.map((pl, i) => planCard(pl, i, { style: `transition-delay:${i * 90}ms`, class: `pr-card pr-${i} reveal` }))),
+      h('div', { class: 'pr-more reveal' }, h('a', { href: '/pricing' }, 'Сравнить планы подробнее'), h('span', { class: 'pr-arrow', 'aria-hidden': 'true' }, '→')),
     ));
 
     const col = (title, links) => h('div', { class: 'lf-col' }, h('b', null, title), ...links);
@@ -1150,22 +1157,40 @@
 
     let body;
     if (kind === 'pricing') {
-      const rows = [
-        ['Проекты и задачи', true, true, true], ['Заметки', true, true, true], ['Таймер времени', true, true, true],
-        ['Участников', 'до 3', 'без ограничений', 'без ограничений'], ['Чат и диск', false, true, true],
-        ['Обзор и отчёты по времени', false, true, true], ['AI-помощник', false, true, true],
-        ['Помощь с запуском', false, false, true], ['Приоритетная поддержка', false, false, true],
+      const groups = [
+        ['Работа', [['Проекты и задачи', true, true, true], ['Заметки', true, true, true], ['Таймер времени', true, true, true], ['Участников', 'до 3', 'без ограничений', 'без ограничений']]],
+        ['Команда', [['Чат и диск', false, true, true], ['Обзор и отчёты по времени', false, true, true], ['AI-помощник', false, true, true]]],
+        ['Сопровождение', [['Помощь с запуском', false, false, true], ['Приоритетная поддержка', false, false, true], ['Свои условия', false, false, true]]],
       ];
       const cell = (v) => (v === true ? h('td', { class: 'yes', 'aria-label': 'есть' }, '✓') : v === false ? h('td', { class: 'no', 'aria-label': 'нет' }, '—') : h('td', null, v));
+      const limits = [['10', 'пространств у владельца'], ['30', 'проектов в пространстве'], ['500', 'задач в проекте'], ['100', 'заметок в пространстве'], ['100', 'файлов в пространстве'], ['40', 'запросов к AI в день']];
+      const faq = [
+        ['Нужна ли карта, чтобы начать?', 'Нет. «Старт» бесплатный и без срока: регистрируешься и работаешь.'],
+        ['Когда появится оплата?', 'Пока её нет, тарифы ориентировочные. Перед запуском оплаты мы заранее напишем об условиях.'],
+        ['Что считается человеком в «Команде»?', 'Каждый участник пространства, которому ты дал доступ к проектам.'],
+        ['Можно ли перейти с тарифа на тариф?', 'Да, в любой момент: данные и проекты остаются на месте.'],
+        ['Что делает AI-помощник?', 'Отвечает только про задачи и проекты: разбивает на шаги, предлагает план дня, помогает назначить исполнителей.'],
+      ];
       body = [
-        h('h1', null, 'Тарифы под любой бюджет'),
-        h('p', { class: 'pg-lead' }, 'Начни бесплатно и переходи дальше, когда команда вырастет.'),
-        h('div', { class: 'pr-cards pg-cards' }, PLANS.map((pl, i) => h('div', { class: `pr-card pr-${i}` }, pl.badge ? h('span', { class: 'pr-badge' }, pl.badge) : null, h('h3', null, pl.name), h('div', { class: 'pr-price' }, pl.price, pl.per ? h('small', null, ' ' + pl.per) : null), h('p', null, pl.text), h('a', { class: 'btn small pr-go', href: i === 2 ? '/contacts' : '/register' }, i === 2 ? 'Связаться' : 'Начать')))),
+        h('div', { class: 'pg-hero' },
+          h('h1', null, 'Тарифы под любой бюджет'),
+          h('p', { class: 'pg-lead' }, 'Начни бесплатно и переходи дальше, когда команда вырастет. Без карты и скрытых платежей.')),
+        h('div', { class: 'pr-cards pg-cards' }, PLANS.map((pl, i) => planCard(pl, i))),
         h('h2', { class: 'pg-h2' }, 'Сравнение планов'),
         h('div', { class: 'cmp-wrap' }, h('table', { class: 'cmp' },
           h('thead', null, h('tr', null, h('th', null, ''), ...PLANS.map((pl) => h('th', null, pl.name)))),
-          h('tbody', null, rows.map(([t, ...v]) => h('tr', null, h('th', { scope: 'row' }, t), ...v.map(cell)))))),
+          ...groups.map(([g, rs]) => h('tbody', null,
+            h('tr', { class: 'cmp-g' }, h('th', { colspan: 4, scope: 'colgroup' }, g)),
+            ...rs.map(([t, ...v]) => h('tr', null, h('th', { scope: 'row' }, t), ...v.map(cell))))))),
         h('p', { class: 'pg-note' }, 'Тарифы пока ориентировочные: условия могут измениться до запуска оплаты.'),
+        h('h2', { class: 'pg-h2' }, 'Лимиты сейчас'),
+        h('div', { class: 'lim' }, limits.map(([n, t]) => h('div', { class: 'lim-i' }, h('b', null, n), h('span', null, t)))),
+        h('h2', { class: 'pg-h2' }, 'Частые вопросы'),
+        h('div', { class: 'faq' }, faq.map(([q, an]) => h('details', { class: 'faq-i' }, h('summary', null, q), h('p', null, an)))),
+        h('div', { class: 'pg-cta' },
+          h('h2', null, 'Попробуй на своих задачах'),
+          h('p', null, 'Регистрация занимает меньше минуты.'),
+          h('a', { class: 'btn', href: '/register' }, 'Создать пространство')),
       ];
     } else if (kind === 'contacts') {
       body = [
