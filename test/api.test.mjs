@@ -261,6 +261,120 @@ assert.equal((await alice('DELETE', `/api/projects/${projId}`, {})).status, 200)
 assert.equal((await alice('GET', `/api/projects/${projId}`)).status, 404);
 ok('удаление метки, задачи и проекта (с каскадом)');
 
+// ---------- типы проектов ----------
+
+r = await alice('POST', `/api/workspaces/${wsId}/projects`, { name: 'Разработка', kind: 'it' });
+assert.equal(r.status, 201);
+const itId = r.data.project.id;
+r = await alice('GET', `/api/projects/${itId}`);
+assert.equal(r.data.project.kind, 'it');
+assert.equal(r.data.columns.length, 6);
+assert.equal(r.data.columns.filter((c) => c.is_done).length, 1);
+r = await alice('POST', `/api/workspaces/${wsId}/projects`, { name: 'Прод', kind: 'advanced' });
+assert.equal((await alice('GET', `/api/projects/${r.data.project.id}`)).data.columns.length, 5);
+r = await alice('POST', `/api/workspaces/${wsId}/projects`, { name: 'Плохой', kind: 'magic' });
+assert.equal(r.status, 400);
+ok('типы проектов: базовый, продвинутый, it');
+
+r = await alice('POST', `/api/projects/${itId}/tasks`, { title: 'Падает логин', task_type: 'bug', estimate_min: 90 });
+assert.equal(r.status, 201);
+const bug = r.data.task;
+assert.equal(bug.task_type, 'bug');
+assert.equal(bug.estimate_min, 90);
+r = await alice('PATCH', `/api/tasks/${bug.id}`, { task_type: 'nope' });
+assert.equal(r.status, 400);
+r = await alice('PATCH', `/api/tasks/${bug.id}`, { task_type: 'feature', estimate_min: null });
+assert.equal(r.data.task.task_type, 'feature');
+assert.equal(r.data.task.estimate_min, null);
+ok('тип и оценка задачи');
+
+// ---------- трекер времени ----------
+
+r = await alice('POST', `/api/tasks/${bug.id}/timer/start`, {});
+assert.equal(r.status, 201);
+r = await alice('GET', '/api/timer');
+assert.equal(r.data.entry.task_id, bug.id);
+r = await alice('POST', `/api/tasks/${bug.id}/timer/start`, {});
+assert.equal(r.status, 201);
+await new Promise((res) => setTimeout(res, 1100));
+r = await alice('POST', '/api/timer/stop', {});
+assert.equal(r.data.stopped, 1);
+assert.equal((await alice('GET', '/api/timer')).data.entry, null);
+r = await alice('POST', `/api/tasks/${bug.id}/time`, { minutes: 30, note: 'разбор' });
+assert.equal(r.status, 201);
+const manual = r.data.entry;
+assert.equal((await alice('POST', `/api/tasks/${bug.id}/time`, { minutes: 0 })).status, 400);
+r = await alice('GET', `/api/tasks/${bug.id}/time`);
+assert.equal(r.data.entries.length, 3);
+assert.ok(r.data.total_sec >= 1800);
+r = await alice('GET', `/api/projects/${itId}`);
+assert.ok(r.data.tasks.find((t) => t.id === bug.id).tracked_sec >= 1800);
+r = await alice('GET', `/api/workspaces/${wsId}/time`);
+assert.ok(r.data.total_sec >= 1800);
+assert.equal(r.data.by_user[0].name, 'Alice');
+assert.ok(r.data.by_project.some((p) => p.id === itId));
+assert.equal((await bob('DELETE', `/api/time/${manual.id}`, {})).status, 404);
+assert.equal((await alice('DELETE', `/api/time/${manual.id}`, {})).status, 200);
+ok('трекер времени: таймер, ручной ввод, отчёт');
+
+// ---------- заметки ----------
+
+r = await alice('POST', `/api/workspaces/${wsId}/notes`, { title: 'Идеи', body: 'первая строка' });
+assert.equal(r.status, 201);
+const note = r.data.note;
+assert.equal((await bob('GET', `/api/notes/${note.id}`)).status, 200);
+r = await bob('PATCH', `/api/notes/${note.id}`, { body: 'правка bob' });
+assert.equal(r.status, 200);
+r = await alice('GET', `/api/workspaces/${wsId}/notes`);
+assert.equal(r.data.notes[0].title, 'Идеи');
+assert.equal(r.data.notes[0].preview, 'правка bob');
+const outsider = client();
+await outsider('POST', '/api/auth/register', { email: `eve${run}@test.dev`, name: 'Eve', password: 'password123' });
+assert.equal((await outsider('GET', `/api/notes/${note.id}`)).status, 404);
+assert.equal((await outsider('GET', `/api/workspaces/${wsId}/notes`)).status, 404);
+assert.equal((await alice('DELETE', `/api/notes/${note.id}`, {})).status, 200);
+ok('заметки: общий доступ участников, чужим 404');
+
+// ---------- чат ----------
+
+r = await alice('POST', `/api/workspaces/${wsId}/messages`, { body: 'привет' });
+assert.equal(r.status, 201);
+const m1 = r.data.message;
+r = await bob('POST', `/api/workspaces/${wsId}/messages`, { body: 'здорово' });
+r = await alice('GET', `/api/workspaces/${wsId}/messages`);
+assert.deepEqual(r.data.messages.map((m) => m.body), ['привет', 'здорово']);
+r = await bob('GET', `/api/workspaces/${wsId}/messages?after=${m1.created_at}`);
+assert.deepEqual(r.data.messages.map((m) => m.body), ['здорово']);
+assert.equal((await outsider('GET', `/api/workspaces/${wsId}/messages`)).status, 404);
+assert.equal((await alice('POST', `/api/workspaces/${wsId}/messages`, { body: '   ' })).status, 400);
+ok('чат: отправка, новые сообщения, чужим 404');
+
+// ---------- диск ----------
+
+const payload = Buffer.from('hello tasqly файл').toString('base64');
+r = await alice('POST', `/api/workspaces/${wsId}/files`, { name: 'a.txt', mime: 'text/plain', data: payload });
+assert.equal(r.status, 201);
+const file = r.data.file;
+assert.equal(file.size, Buffer.from('hello tasqly файл').length);
+assert.equal((await alice('POST', `/api/workspaces/${wsId}/files`, { name: 'x', data: '***' })).status, 400);
+assert.equal((await alice('POST', `/api/workspaces/${wsId}/files`, { name: 'big', data: Buffer.alloc(1_100_000).toString('base64') })).status, 413);
+r = await alice('GET', `/api/workspaces/${wsId}/files`);
+assert.equal(r.data.files.length, 1);
+assert.equal(r.data.used, file.size);
+const dl = await fetch(`${BASE}/api/files/${file.id}/download`, { headers: { cookie: '' } });
+assert.equal(dl.status, 401);
+const tokenRes = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: `alice${run}@test.dev`, password: 'password123' }) });
+const { token } = await tokenRes.json();
+const dl2 = await fetch(`${BASE}/api/files/${file.id}/download`, { headers: { authorization: `Bearer ${token}` } });
+assert.equal(dl2.status, 200);
+assert.equal(await dl2.text(), 'hello tasqly файл');
+assert.match(dl2.headers.get('content-disposition'), /attachment/);
+assert.equal((await outsider('GET', `/api/files/${file.id}/download`)).status, 404);
+assert.equal((await bob('DELETE', `/api/files/${file.id}`, {})).status, 403);
+assert.equal((await alice('DELETE', `/api/files/${file.id}`, {})).status, 200);
+assert.equal((await alice('GET', `/api/workspaces/${wsId}/files`)).data.files.length, 0);
+ok('диск: загрузка, скачивание, лимиты, права');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

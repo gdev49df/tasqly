@@ -207,6 +207,91 @@
   const SEEN_KEY = 'tq_inbox_seen';
   const lastSeen = () => Number(localStorage.getItem(SEEN_KEY) || 0);
 
+
+  // ---------- типы проектов и задач ----------
+
+  const KINDS = {
+    basic: { name: 'Базовый', hint: 'Три колонки: к выполнению, в работе, готово' },
+    advanced: { name: 'Продвинутый', hint: 'Бэклог, проверка, оценка времени по задачам' },
+    it: { name: 'IT', hint: 'Спринт, code review, тестирование, типы задач: баг, фича, техдолг' },
+  };
+  const TASK_TYPES = { task: 'Задача', bug: 'Баг', feature: 'Фича', debt: 'Техдолг' };
+  const TASK_TYPE_COLORS = { bug: '#e5484d', feature: '#3e63dd', debt: '#f76b15' };
+
+  // ---------- время ----------
+
+  function fmtDur(sec) {
+    sec = Math.max(0, Math.round(sec));
+    const hh = Math.floor(sec / 3600);
+    const mm = Math.floor((sec % 3600) / 60);
+    if (!hh && !mm) return sec ? '< 1 мин' : '0 мин';
+    return hh ? `${hh} ч ${pad(mm)} мин` : `${mm} мин`;
+  }
+  const fmtClock = (sec) => `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}:${pad(Math.floor(sec % 60))}`;
+  const fmtBytes = (n) => (n < 1024 ? `${n} Б` : n < 1048576 ? `${(n / 1024).toFixed(1)} КБ` : `${(n / 1048576).toFixed(1)} МБ`);
+  const fmtDateTime = (ts) => new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+  let timerOffset = 0;
+  const elapsedSec = () => (state.timer ? (Date.now() + timerOffset - state.timer.started_at) / 1000 : 0);
+
+  async function refreshTimer() {
+    try {
+      const r = await api.get('/api/timer');
+      state.timer = r.entry;
+      state.timerLoaded = true;
+      timerOffset = r.server_time - Date.now();
+    } catch {
+      /* без таймера */
+    }
+    paintTimer();
+  }
+
+  async function stopTimer() {
+    try {
+      await api.post('/api/timer/stop');
+      state.timer = null;
+      paintTimer();
+      toast('Таймер остановлен');
+      window.dispatchEvent(new Event('tq-timer'));
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  function paintTimer() {
+    document.querySelectorAll('.timer-slot').forEach((slot) => {
+      if (!state.timer) return slot.replaceChildren();
+      slot.replaceChildren(
+        h(
+          'a',
+          { class: 'timer-pill', href: `#/p/${state.timer.project_id}`, title: state.timer.task_title },
+          h('span', { class: 'rec' }),
+          h('span', { class: 'clock' }, fmtClock(elapsedSec())),
+          h('span', { class: 'ttl' }, state.timer.task_title),
+          h(
+            'button',
+            {
+              class: 'icon-btn',
+              title: 'Остановить таймер',
+              'aria-label': 'Остановить таймер',
+              onclick: (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                stopTimer();
+              },
+            },
+            '■',
+          ),
+        ),
+      );
+    });
+  }
+  setInterval(() => {
+    if (!state.timer) return;
+    const t = fmtClock(elapsedSec());
+    document.querySelectorAll('.timer-pill .clock, .timer-live').forEach((el) => (el.textContent = t));
+  }, 1000);
+
   // ---------- левая панель ----------
 
   function openDrawer() {
@@ -353,6 +438,10 @@
   function topbar(crumbs) {
     const mail = state.user ? h('button', { class: 'icon-btn mail-btn', title: 'Входящие', 'aria-label': 'Входящие', onclick: (e) => openInbox(e.currentTarget) }, icon('mail')) : null;
     if (mail) loadBadge(mail);
+    if (state.user) {
+      if (state.timerLoaded) queueMicrotask(paintTimer);
+      else refreshTimer();
+    }
     const profile = state.user
       ? h('button', { class: 'profile-btn', title: state.user.name, 'aria-label': 'Профиль', onclick: (e) => openProfile(e.currentTarget) }, avatar(state.user.name))
       : null;
@@ -362,6 +451,7 @@
       state.user ? h('button', { class: 'icon-btn', title: 'Меню', 'aria-label': 'Открыть меню', onclick: openDrawer }, icon('menu')) : null,
       h('a', { class: 'logo', href: '#/' }, 'tasq', h('b', null, 'ly')),
       h('nav', { class: 'crumbs' }, crumbs.map((c) => [h('span', null, '/'), c.href ? h('a', { href: c.href }, c.label) : h('span', { class: 'current' }, c.label)])),
+      h('div', { class: 'timer-slot' }),
       mail,
       profile,
     );
@@ -379,6 +469,8 @@
     }
     tokenStore.set('');
     state.user = null;
+    state.timer = null;
+    state.timerLoaded = false;
     location.hash = '#/';
     route();
   }
@@ -494,15 +586,48 @@
 
   // ---------- пространство: проекты и участники ----------
 
-  async function viewWorkspace(id) {
-    const { workspace, members, projects } = await api.get(`/api/workspaces/${id}`);
-    document.title = `${workspace.name} · tasqly`;
+  const WS_TABS = [
+    ['projects', 'Проекты'],
+    ['notes', 'Заметки'],
+    ['time', 'Время'],
+    ['chat', 'Чат'],
+    ['files', 'Диск'],
+  ];
 
+  async function viewWorkspace(id, tab = 'projects') {
+    if (!WS_TABS.some(([k]) => k === tab)) tab = 'projects';
+    const data = await api.get(`/api/workspaces/${id}`);
+    const { workspace } = data;
+    document.title = `${workspace.name} · tasqly`;
+    const panel = { projects: panelProjects, notes: panelNotes, time: panelTime, chat: panelChat, files: panelFiles }[tab](id, data);
+
+    render(
+      topbar([{ label: 'Пространства', href: '#/' }, { label: workspace.name }]),
+      h(
+        'div',
+        { class: `container${tab === 'projects' ? '' : ' wide'}` },
+        h('h1', null, workspace.name),
+        h('nav', { class: 'ws-tabs', 'aria-label': 'Разделы пространства' }, WS_TABS.map(([k, label]) => h('a', { class: `ws-tab${k === tab ? ' active' : ''}`, href: k === 'projects' ? `#/w/${id}` : `#/w/${id}/${k}` }, label))),
+        panel,
+      ),
+    );
+  }
+
+  function panelProjects(id, { workspace, members, projects }) {
     const nameInput = h('input', { type: 'text', placeholder: 'Название проекта', maxlength: 80 });
+    let kind = 'basic';
+    const kindBox = h('div', { class: 'kinds' });
+    const paintKinds = () =>
+      kindBox.replaceChildren(
+        ...Object.entries(KINDS).map(([k, v]) =>
+          h('button', { type: 'button', class: `kind${k === kind ? ' on' : ''}`, onclick: () => ((kind = k), paintKinds()) }, h('b', null, v.name), h('span', null, v.hint)),
+        ),
+      );
+    paintKinds();
     const create = async () => {
       if (!nameInput.value.trim()) return;
       try {
-        const { project } = await api.post(`/api/workspaces/${id}/projects`, { name: nameInput.value });
+        const { project } = await api.post(`/api/workspaces/${id}/projects`, { name: nameInput.value, kind });
         location.hash = `#/p/${project.id}`;
       } catch (e) {
         toast(e.message);
@@ -519,44 +644,356 @@
       }
     };
 
-    render(
-      topbar([{ label: 'Пространства', href: '#/' }, { label: workspace.name }]),
+    return h(
+      'div',
+      null,
+      projects.length
+        ? h(
+            'div',
+            { class: 'grid' },
+            projects.map((p) =>
+              h(
+                'a',
+                { class: 'tile', href: `#/p/${p.id}` },
+                h('div', { class: 'name' }, p.name, p.kind && p.kind !== 'basic' ? h('span', { class: 'pill kind-pill' }, KINDS[p.kind].name) : null),
+                h('div', { class: 'meta' }, p.total ? `${p.done} из ${p.total} задач выполнено` : 'Задач пока нет'),
+                h('div', { class: 'progress' }, h('span', { style: `width:${p.total ? Math.round((p.done / p.total) * 100) : 0}%` })),
+              ),
+            ),
+          )
+        : h('div', { class: 'card empty' }, 'Проектов пока нет. Создай первый ниже.'),
+      h('div', { class: 'spacer' }),
+      h('h2', null, 'Новый проект'),
+      kindBox,
+      h('div', { class: 'row', style: 'margin-top:10px' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Добавить проект')),
+      h('div', { class: 'spacer' }),
+      h('h2', null, 'Участники'),
+      h('div', { class: 'people' }, members.map((m) => h('span', { class: 'chip' }, avatar(m.name), m.name))),
+      h('div', { class: 'spacer' }),
       h(
         'div',
-        { class: 'container' },
-        h('h1', null, workspace.name),
-        h('p', { class: 'sub' }, 'Проекты и участники пространства'),
-        h('h2', null, 'Проекты'),
-        projects.length
-          ? h(
-              'div',
-              { class: 'grid' },
-              projects.map((p) =>
-                h(
-                  'a',
-                  { class: 'tile', href: `#/p/${p.id}` },
-                  h('div', { class: 'name' }, p.name),
-                  h('div', { class: 'meta' }, p.total ? `${p.done} из ${p.total} задач выполнено` : 'Задач пока нет'),
-                  h('div', { class: 'progress' }, h('span', { style: `width:${p.total ? Math.round((p.done / p.total) * 100) : 0}%` })),
-                ),
-              ),
-            )
-          : h('div', { class: 'card empty' }, 'Проектов пока нет. Создай первый кнопкой выше.'),
-        h('div', { class: 'spacer' }),
-        h('div', { class: 'row' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Добавить проект')),
-        h('div', { class: 'spacer' }),
-        h('h2', null, 'Участники'),
-        h('div', { class: 'people' }, members.map((m) => h('span', { class: 'chip' }, avatar(m.name), m.name))),
-        h('div', { class: 'spacer' }),
-        h(
-          'div',
-          { class: 'card' },
-          h('h2', null, 'Пригласить в команду'),
-          h('p', { class: 'sub', style: 'margin-bottom:12px' }, 'Отправь этот код: человек вводит его на главной странице'),
-          h('div', { class: 'row' }, h('span', { class: 'invite' }, workspace.invite_code), h('button', { class: 'btn ghost small', onclick: copyCode }, 'Копировать')),
-        ),
+        { class: 'card' },
+        h('h2', null, 'Пригласить в команду'),
+        h('p', { class: 'sub', style: 'margin-bottom:12px' }, 'Отправь этот код: человек вводит его на главной странице'),
+        h('div', { class: 'row' }, h('span', { class: 'invite' }, workspace.invite_code), h('button', { class: 'btn ghost small', onclick: copyCode }, 'Копировать')),
       ),
     );
+  }
+
+  // ---------- заметки ----------
+
+  function panelNotes(id) {
+    let notes = [];
+    let current = null; // полная заметка в редакторе
+    let saveTimer = null;
+    const listEl = h('div', { class: 'notes-list' });
+    const editor = h('div', { class: 'note-editor' });
+
+    const stamp = (ts) => new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    const paintList = () =>
+      listEl.replaceChildren(
+        ...(notes.length
+          ? notes.map((n) =>
+              h(
+                'button',
+                { class: `note-item${current && current.id === n.id ? ' on' : ''}`, onclick: () => openNote(n.id) },
+                h('div', { class: 'note-title' }, n.title || 'Без названия'),
+                h('div', { class: 'note-prev' }, n.preview || 'Пустая заметка'),
+                h('div', { class: 'note-meta' }, `${n.author || '—'} · ${stamp(n.updated_at)}`),
+              ),
+            )
+          : [h('div', { class: 'drawer-note' }, 'Заметок пока нет. Запиши идею, договорённость или детали задачи.')]),
+      );
+
+    async function flush() {
+      if (!current || !saveTimer) return;
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      try {
+        const { note } = await api.patch(`/api/notes/${current.id}`, { title: current.title, body: current.body });
+        const item = notes.find((n) => n.id === current.id);
+        if (item) Object.assign(item, { title: note.title, preview: note.body.slice(0, 140), updated_at: note.updated_at });
+        notes.sort((a, b) => b.updated_at - a.updated_at);
+        paintList();
+        status.textContent = 'Сохранено';
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+    const status = h('span', { class: 'saved' });
+    const queueSave = () => {
+      status.textContent = 'Сохраняю…';
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(flush, 700);
+    };
+    const prevCleanup = cleanup;
+    cleanup = () => {
+      flush();
+      if (prevCleanup) prevCleanup();
+    };
+
+    async function openNote(noteId) {
+      await flush();
+      try {
+        const { note } = await api.get(`/api/notes/${noteId}`);
+        current = note;
+        paintList();
+        paintEditor();
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+
+    function paintEditor() {
+      if (!current) {
+        editor.replaceChildren(h('div', { class: 'empty' }, 'Выбери заметку слева или создай новую'));
+        return;
+      }
+      const title = h('input', { type: 'text', class: 'note-title-input', placeholder: 'Название', maxlength: 120, value: current.title });
+      const body = h('textarea', { class: 'note-body', placeholder: 'Пиши здесь. Заметка общая для всех участников пространства.', maxlength: 20000 });
+      body.value = current.body;
+      title.addEventListener('input', () => ((current.title = title.value), queueSave()));
+      body.addEventListener('input', () => ((current.body = body.value), queueSave()));
+      const del = async () => {
+        if (!confirm('Удалить заметку?')) return;
+        try {
+          await api.del(`/api/notes/${current.id}`);
+          notes = notes.filter((n) => n.id !== current.id);
+          current = null;
+          saveTimer = null;
+          paintList();
+          paintEditor();
+        } catch (e) {
+          toast(e.message);
+        }
+      };
+      editor.replaceChildren(title, body, h('div', { class: 'modal-actions' }, h('button', { class: 'btn danger small', onclick: del }, 'Удалить'), status));
+    }
+
+    const addNote = async () => {
+      try {
+        const { note } = await api.post(`/api/workspaces/${id}/notes`, {});
+        notes.unshift({ id: note.id, title: '', preview: '', updated_at: note.updated_at, author: note.author });
+        await openNote(note.id);
+        const t = editor.querySelector('.note-title-input');
+        if (t) t.focus();
+      } catch (e) {
+        toast(e.message);
+      }
+    };
+
+    api
+      .get(`/api/workspaces/${id}/notes`)
+      .then((r) => {
+        notes = r.notes;
+        paintList();
+        paintEditor();
+      })
+      .catch((e) => toast(e.message));
+
+    return h('div', { class: 'notes' }, h('aside', { class: 'notes-side' }, h('button', { class: 'btn', onclick: addNote }, '+ Новая заметка'), listEl), editor);
+  }
+
+  // ---------- отчёт по времени ----------
+
+  function panelTime(id) {
+    const box = h('div', null, h('div', { class: 'empty' }, 'Загрузка…'));
+    let days = 30;
+    const bars = (rows, total) =>
+      rows.length
+        ? rows.map((r) => h('div', { class: 'bar-row' }, h('div', { class: 'bar-label' }, r.name), h('div', { class: 'bar' }, h('span', { style: `width:${total ? Math.max(3, Math.round((r.seconds / total) * 100)) : 0}%` })), h('div', { class: 'bar-val' }, fmtDur(r.seconds))))
+        : [h('div', { class: 'drawer-note' }, 'Пока нет записей')];
+
+    async function load() {
+      try {
+        const r = await api.get(`/api/workspaces/${id}/time?days=${days}`);
+        const periods = h('div', { class: 'seg' }, [7, 30, 90].map((d) => h('button', { class: d === days ? 'active' : '', onclick: () => ((days = d), load()) }, `${d} дн.`)));
+        box.replaceChildren(
+          h('div', { class: 'time-head' }, h('div', null, h('div', { class: 'big' }, fmtDur(r.total_sec)), h('div', { class: 'sub', style: 'margin:0' }, `всего за ${days} дн.`)), periods),
+          h('div', { class: 'time-cols' }, h('div', { class: 'card' }, h('h2', null, 'По людям'), bars(r.by_user, r.total_sec)), h('div', { class: 'card' }, h('h2', null, 'По проектам'), bars(r.by_project, r.total_sec))),
+          h('h2', { style: 'margin-top:22px' }, 'Последние записи'),
+          r.recent.length
+            ? h('div', { class: 'card flush' }, r.recent.map((e) => h('a', { class: 'time-row', href: `#/p/${e.project_id}` }, h('span', { class: 'grow' }, h('b', null, e.task_title), e.note ? h('span', { class: 'mail-sub' }, ` · ${e.note}`) : null), h('span', { class: 'mail-sub' }, e.author), h('span', { class: 'mail-sub' }, fmtDateTime(e.started_at)), h('span', { class: 'dur' }, fmtDur(e.seconds)))))
+            : h('div', { class: 'card empty' }, 'Включи таймер в окне задачи или добавь время вручную: здесь появится отчёт.'),
+        );
+      } catch (e) {
+        box.replaceChildren(h('div', { class: 'card empty' }, e.message));
+      }
+    }
+    load();
+    return box;
+  }
+
+  // ---------- чат ----------
+
+  function panelChat(id) {
+    const list = h('div', { class: 'chat-list', 'aria-live': 'polite' });
+    let last = 0;
+    const seen = new Set();
+    const nearBottom = () => list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    const timeOf = (ts) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+    function add(msgs) {
+      const stick = nearBottom() || !last;
+      let added = false;
+      for (const m of msgs) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        last = Math.max(last, m.created_at);
+        added = true;
+        const mine = m.user_id === state.user.id;
+        list.append(h('div', { class: `msg${mine ? ' mine' : ''}` }, mine ? null : avatar(m.author || '?'), h('div', { class: 'bubble' }, mine ? null : h('div', { class: 'who' }, m.author || 'Кто-то'), h('div', { class: 'text' }, m.body), h('div', { class: 'when' }, timeOf(m.created_at)))));
+      }
+      if (added && stick) list.scrollTop = list.scrollHeight;
+    }
+    async function poll() {
+      try {
+        const r = await api.get(`/api/workspaces/${id}/messages${last ? `?after=${last}` : ''}`);
+        add(r.messages);
+        if (!last && !r.messages.length) list.replaceChildren(h('div', { class: 'empty', id: 'chat-empty' }, 'Сообщений пока нет. Напиши первым.'));
+      } catch {
+        /* повторим при следующем опросе */
+      }
+    }
+    const emptyHint = () => {
+      const e = list.querySelector('#chat-empty');
+      if (e) e.remove();
+    };
+    const input = h('textarea', { rows: 1, placeholder: 'Сообщение (Enter отправляет, Shift+Enter новая строка)', maxlength: 2000, 'aria-label': 'Сообщение' });
+    const send = async () => {
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      try {
+        const { message } = await api.post(`/api/workspaces/${id}/messages`, { body: text });
+        emptyHint();
+        add([message]);
+        list.scrollTop = list.scrollHeight;
+      } catch (e) {
+        input.value = text;
+        toast(e.message);
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        send();
+      }
+    });
+    poll();
+    const timer = setInterval(() => !document.hidden && poll(), 3000);
+    const prevCleanup = cleanup;
+    cleanup = () => {
+      clearInterval(timer);
+      if (prevCleanup) prevCleanup();
+    };
+    return h('div', { class: 'chat' }, list, h('div', { class: 'chat-input' }, input, h('button', { class: 'btn', onclick: send }, 'Отправить')));
+  }
+
+  // ---------- диск ----------
+
+  async function downloadFile(f) {
+    try {
+      const token = tokenStore.get();
+      const res = await fetch(`${API_BASE}/api/files/${f.id}/download`, { headers: token ? { authorization: `Bearer ${token}` } : {}, credentials: API_BASE ? 'omit' : 'same-origin' });
+      if (!res.ok) throw new Error(`ошибка ${res.status}`);
+      const url = URL.createObjectURL(await res.blob());
+      const a = h('a', { href: url, download: f.name });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {
+      toast(`Не удалось скачать: ${e.message}`);
+    }
+  }
+
+  function fileIcon(mime = '', name = '') {
+    if (mime.startsWith('image/')) return '🖼';
+    if (mime === 'application/pdf') return '📕';
+    if (/\.(docx?|odt|rtf)$/i.test(name)) return '📝';
+    if (/\.(xlsx?|csv|ods)$/i.test(name)) return '📊';
+    if (/\.(zip|rar|7z|gz)$/i.test(name)) return '🗜';
+    return '📄';
+  }
+
+  function panelFiles(id) {
+    const listEl = h('div', { class: 'card flush' });
+    const usage = h('div', { class: 'sub', style: 'margin:0' });
+    let files = [];
+    let info = { used: 0, limit: 20000000, max_file: 1000000 };
+
+    function paint() {
+      usage.textContent = `Занято ${fmtBytes(info.used)} из ${fmtBytes(info.limit)}. Один файл до ${fmtBytes(info.max_file)}.`;
+      listEl.replaceChildren(
+        ...(files.length
+          ? files.map((f) =>
+              h(
+                'div',
+                { class: 'file-row' },
+                h('span', { class: 'file-ico' }, fileIcon(f.mime, f.name)),
+                h('div', { class: 'file-main' }, h('div', { class: 'file-name' }, f.name), h('div', { class: 'mail-sub' }, `${fmtBytes(f.size)} · ${f.author || '—'} · ${fmtDateTime(f.created_at)}`)),
+                h('button', { class: 'btn ghost small', onclick: () => downloadFile(f) }, 'Скачать'),
+                f.uploaded_by === state.user.id || canDelete ? h('button', { class: 'icon-btn', title: 'Удалить', 'aria-label': 'Удалить файл', onclick: () => remove(f) }, '✕') : null,
+              ),
+            )
+          : [h('div', { class: 'empty' }, 'Файлов пока нет. Перетащи сюда или нажми «Загрузить».')]),
+      );
+    }
+    let canDelete = false;
+    async function load() {
+      try {
+        const r = await api.get(`/api/workspaces/${id}/files`);
+        files = r.files;
+        info = r;
+        paint();
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+    async function remove(f) {
+      if (!confirm(`Удалить «${f.name}»?`)) return;
+      try {
+        await api.del(`/api/files/${f.id}`);
+        await load();
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+    const toBase64 = (file) =>
+      new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+        fr.onerror = () => reject(new Error('не удалось прочитать файл'));
+        fr.readAsDataURL(file);
+      });
+    async function upload(fileList) {
+      for (const file of fileList) {
+        if (file.size > info.max_file) {
+          toast(`«${file.name}» больше ${fmtBytes(info.max_file)}`);
+          continue;
+        }
+        if (!file.size) {
+          toast(`«${file.name}» пустой`);
+          continue;
+        }
+        try {
+          await api.post(`/api/workspaces/${id}/files`, { name: file.name, mime: file.type || 'application/octet-stream', data: await toBase64(file) });
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      await load();
+    }
+    const picker = h('input', { type: 'file', multiple: true, hidden: true, onchange: () => (upload([...picker.files]), (picker.value = '')) });
+    const drop = h('div', { class: 'dropzone' }, h('span', null, 'Перетащи файлы сюда'), h('button', { class: 'btn small', onclick: () => picker.click() }, 'Загрузить'), picker);
+    ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => (e.preventDefault(), drop.classList.add('over'))));
+    ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => (e.preventDefault(), drop.classList.remove('over'))));
+    drop.addEventListener('drop', (e) => upload([...e.dataTransfer.files]));
+
+    api.get(`/api/workspaces/${id}`).then((r) => ((canDelete = r.workspace.role === 'owner'), paint())).catch(() => {});
+    load();
+    return h('div', null, drop, usage, h('div', { class: 'spacer', style: 'height:12px' }), listEl);
   }
 
   // ---------- проект ----------
@@ -675,7 +1112,7 @@
       const el = h(
         'div',
         { class: `task${isDone(t) ? ' done' : ''}`, draggable: 'true', 'data-id': t.id, onclick: () => openTask(t.id) },
-        t.label_ids.length ? h('div', { class: 'pills' }, t.label_ids.map(labelPill)) : null,
+        t.label_ids.length || (t.task_type && t.task_type !== 'task') ? h('div', { class: 'pills' }, t.task_type && t.task_type !== 'task' ? h('span', { class: 'pill', style: `--c:${TASK_TYPE_COLORS[t.task_type]}` }, TASK_TYPES[t.task_type].toLowerCase()) : null, t.label_ids.map(labelPill)) : null,
         h('div', { class: 'title' }, t.title),
         h(
           'div',
@@ -684,6 +1121,7 @@
           t.due_date ? h('span', { class: isLate(t) ? 'late' : '' }, formatDate(t.due_date)) : null,
           t.check_total ? h('span', { class: t.check_done === t.check_total ? 'ok' : '' }, `☑ ${t.check_done}/${t.check_total}`) : null,
           t.comments ? h('span', null, `💬 ${t.comments}`) : null,
+          t.tracked_sec || t.estimate_min ? h('span', { class: t.estimate_min && t.tracked_sec > t.estimate_min * 60 ? 'late' : '', title: 'Затрачено / оценка' }, `⏱ ${t.tracked_sec ? fmtDur(t.tracked_sec) : '0'}${t.estimate_min ? ` / ${fmtDur(t.estimate_min * 60)}` : ''}`) : null,
           h('span', { class: 'grow' }),
           t.assignee_id ? avatar(memberName(t.assignee_id)) : null,
         ),
@@ -997,6 +1435,100 @@
       const due = h('input', { type: 'date', value: task.due_date || '' });
       due.addEventListener('change', () => save({ due_date: due.value || null }));
 
+      const kind = S.project.kind || 'basic';
+      const typeSel = h('select', null, Object.entries(TASK_TYPES).map(([k, v]) => h('option', { value: k, selected: k === (task.task_type || 'task') }, v)));
+      typeSel.addEventListener('change', () => save({ task_type: typeSel.value }));
+      const estimate = h('input', { type: 'number', min: 0, max: 1000, step: 0.5, placeholder: 'часы', value: task.estimate_min ? String(task.estimate_min / 60) : '' });
+      estimate.addEventListener('change', () => {
+        const v = estimate.value === '' ? null : Math.round(Number(estimate.value) * 60);
+        if (v !== null && (!Number.isFinite(v) || v < 0)) return toast('Оценка: число часов');
+        save({ estimate_min: v }).then(paintTime);
+      });
+
+      // время: таймер, ручной ввод и записи
+      const timeBox = h('div', { class: 'time-box' });
+      let timeEntries = [];
+      let timeTotal = 0;
+      const timerHere = () => state.timer && state.timer.task_id === task.id;
+      async function loadTime() {
+        try {
+          const r = await api.get(`/api/tasks/${task.id}/time`);
+          timeEntries = r.entries;
+          timeTotal = r.total_sec;
+          task.tracked_sec = r.total_sec;
+          paint();
+          paintTime();
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      async function toggleTimer() {
+        try {
+          if (timerHere()) await api.post('/api/timer/stop');
+          else {
+            const r = await api.post(`/api/tasks/${task.id}/timer/start`);
+            state.timer = r.entry;
+            timerOffset = r.server_time - Date.now();
+          }
+          if (!timerHere() || !state.timer) state.timer = null;
+          await refreshTimer();
+          await loadTime();
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      const manualMin = h('input', { type: 'number', min: 1, max: 1440, placeholder: 'минут' });
+      const manualNote = h('input', { type: 'text', placeholder: 'Что делал (необязательно)', maxlength: 200 });
+      async function addManual() {
+        const minutes = Math.round(Number(manualMin.value));
+        if (!minutes || minutes < 1) return toast('Укажи минуты, от 1 до 1440');
+        try {
+          await api.post(`/api/tasks/${task.id}/time`, { minutes, note: manualNote.value });
+          manualMin.value = '';
+          manualNote.value = '';
+          flash('Время добавлено');
+          await loadTime();
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      function paintTime() {
+        const est = task.estimate_min ? task.estimate_min * 60 : 0;
+        const pct = est ? Math.min(100, Math.round((timeTotal / est) * 100)) : 0;
+        timeBox.replaceChildren(
+          h(
+            'div',
+            { class: 'time-top' },
+            h('button', { class: `btn small${timerHere() ? ' danger' : ''}`, onclick: toggleTimer }, timerHere() ? '■ Остановить' : '▶ Запустить таймер'),
+            timerHere() ? h('span', { class: 'timer-live' }, fmtClock(elapsedSec())) : null,
+            h('span', { class: 'grow' }),
+            h('span', { class: 'mail-sub' }, `Затрачено: ${fmtDur(timeTotal)}${est ? ` из ${fmtDur(est)}` : ''}`),
+          ),
+          est ? h('div', { class: `progress${timeTotal > est ? ' over' : ''}` }, h('span', { style: `width:${pct}%` })) : null,
+          h('div', { class: 'row', style: 'margin-top:10px' }, manualMin, manualNote, h('button', { class: 'btn ghost small', onclick: addManual }, 'Добавить')),
+          timeEntries.length
+            ? h(
+                'div',
+                { class: 'time-list' },
+                timeEntries.slice(0, 5).map((e) =>
+                  h(
+                    'div',
+                    { class: 'time-line' },
+                    h('span', { class: 'grow' }, `${e.author || '—'}${e.note ? ` · ${e.note}` : ''}`),
+                    h('span', { class: 'mail-sub' }, fmtDateTime(e.started_at)),
+                    h('span', { class: 'dur' }, e.ended_at ? fmtDur(e.seconds) : 'идёт'),
+                    e.user_id === state.user.id && e.ended_at
+                      ? h('button', { class: 'icon-btn', title: 'Удалить запись', 'aria-label': 'Удалить запись', onclick: async () => (await api.del(`/api/time/${e.id}`).catch((er) => toast(er.message)), loadTime()) }, '✕')
+                      : null,
+                  ),
+                ),
+              )
+            : null,
+        );
+      }
+      const onTimer = () => paintTime();
+      window.addEventListener('tq-timer', onTimer);
+
       // метки
       const labelBox = h('div', { class: 'label-picker' });
       let manage = false;
@@ -1189,6 +1721,7 @@
       const close = () => {
         // дописанное поле сохраняется при потере фокуса
         if (overlay.contains(document.activeElement)) document.activeElement.blur();
+        window.removeEventListener('tq-timer', onTimer);
         overlay.remove();
       };
       overlay.addEventListener('tq-close', close);
@@ -1215,6 +1748,8 @@
           desc,
           h('div', { class: 'two' }, h('div', null, h('label', { class: 'field' }, 'Колонка'), columnSel), h('div', null, h('label', { class: 'field' }, 'Приоритет'), prioSel)),
           h('div', { class: 'two' }, h('div', null, h('label', { class: 'field' }, 'Исполнитель'), assigneeSel), h('div', null, h('label', { class: 'field' }, 'Срок'), due)),
+          kind !== 'basic' ? h('div', { class: 'two' }, kind === 'it' ? h('div', null, h('label', { class: 'field' }, 'Тип задачи'), typeSel) : h('div'), h('div', null, h('label', { class: 'field' }, 'Оценка, часов'), estimate)) : null,
+          h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Время'), timeBox),
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Метки'), labelBox, h('div', { class: 'new-label' }, newName, swatches, h('button', { class: 'btn ghost small', onclick: createLabel }, 'Добавить'))),
           h('div', { class: 'section' }, h('label', { class: 'field', style: 'margin-top:0' }, 'Подзадачи'), checkBox),
           saved,
@@ -1223,6 +1758,7 @@
       );
       document.body.append(overlay);
 
+      loadTime();
       api
         .get(`/api/tasks/${task.id}/comments`)
         .then((r) => ((comments = r.comments), paintComments()))
@@ -1396,9 +1932,9 @@
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
     if (!state.user) return viewAuth();
     const hash = location.hash || '#/';
-    const [, kind, id] = hash.match(/^#\/(?:(w|p)\/([\w-]+))?$/) || [];
+    const [, kind, id, tab] = hash.match(/^#\/(?:(w|p)\/([\w-]+)(?:\/(\w+))?)?$/) || [];
     try {
-      if (kind === 'w') await viewWorkspace(id);
+      if (kind === 'w') await viewWorkspace(id, tab);
       else if (kind === 'p') await viewProject(id);
       else await viewHome();
     } catch (e) {

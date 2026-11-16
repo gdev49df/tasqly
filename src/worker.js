@@ -126,7 +126,7 @@ async function requireMember(env, workspaceId, userId) {
 
 async function projectContext(env, projectId, userId) {
   const project = await env.DB.prepare(
-    `SELECT p.id, p.name, p.workspace_id, m.role FROM projects p
+    `SELECT p.id, p.name, p.kind, p.workspace_id, m.role FROM projects p
      JOIN members m ON m.workspace_id = p.workspace_id AND m.user_id = ?
      WHERE p.id = ?`,
   )
@@ -229,15 +229,52 @@ function validatePosition(value) {
   return value;
 }
 
-const DEFAULT_COLUMNS = [
-  { name: 'К выполнению', is_done: 0 },
-  { name: 'В работе', is_done: 0 },
-  { name: 'Готово', is_done: 1 },
-];
+// три типа проектов: набор колонок под процесс
+const PROJECT_KINDS = {
+  basic: [
+    { name: 'К выполнению', is_done: 0 },
+    { name: 'В работе', is_done: 0 },
+    { name: 'Готово', is_done: 1 },
+  ],
+  advanced: [
+    { name: 'Бэклог', is_done: 0 },
+    { name: 'К выполнению', is_done: 0 },
+    { name: 'В работе', is_done: 0 },
+    { name: 'На проверке', is_done: 0 },
+    { name: 'Готово', is_done: 1 },
+  ],
+  it: [
+    { name: 'Бэклог', is_done: 0 },
+    { name: 'Спринт', is_done: 0 },
+    { name: 'В работе', is_done: 0 },
+    { name: 'Code review', is_done: 0 },
+    { name: 'Тестирование', is_done: 0 },
+    { name: 'Готово', is_done: 1 },
+  ],
+};
+const TASK_TYPES = ['task', 'bug', 'feature', 'debt'];
+const MAX_FILE_BYTES = 1_000_000;
+const MAX_WORKSPACE_FILES_BYTES = 20_000_000;
+
+function validateKind(value) {
+  if (value === undefined) return 'basic';
+  if (!Object.hasOwn(PROJECT_KINDS, value)) fail(400, 'неизвестный тип проекта');
+  return value;
+}
+function validateTaskType(value) {
+  if (!TASK_TYPES.includes(value)) fail(400, 'неизвестный тип задачи');
+  return value;
+}
+function validateEstimate(value) {
+  if (value === null) return null;
+  if (!Number.isInteger(value) || value < 0 || value > 60000) fail(400, 'оценка: от 0 до 60000 минут');
+  return value;
+}
 
 // общий запрос задачи: плюс счётчики и список меток
 const TASK_SELECT = `SELECT t.id, t.project_id, t.column_id, t.title, t.description, t.priority, t.assignee_id, t.due_date,
-    t.position, t.created_at, t.updated_at,
+    t.position, t.created_at, t.updated_at, t.task_type, t.estimate_min,
+    (SELECT COALESCE(SUM(seconds), 0) FROM time_entries te WHERE te.task_id = t.id AND te.ended_at IS NOT NULL) AS tracked_sec,
     (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) AS comments,
     (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id) AS check_total,
     (SELECT COUNT(*) FROM checklist_items i WHERE i.task_id = t.id AND i.done = 1) AS check_done,
@@ -414,7 +451,7 @@ route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
       .bind(params.id)
       .all(),
     env.DB.prepare(
-      `SELECT p.id, p.name,
+      `SELECT p.id, p.name, p.kind,
          (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS total,
          (SELECT COUNT(*) FROM tasks t JOIN columns c ON c.id = t.column_id WHERE t.project_id = p.id AND c.is_done = 1) AS done
        FROM projects p WHERE p.workspace_id = ? ORDER BY p.created_at`,
@@ -429,11 +466,12 @@ route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
 route('POST', '/api/workspaces/:id/projects', async ({ env, user, params, body }) => {
   await requireMember(env, params.id, user.id);
   const name = cleanString(body.name, 'название', { max: 80 });
+  const kind = validateKind(body.kind);
   const id = newId();
   const ts = now();
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO projects (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)').bind(id, params.id, name, ts),
-    ...DEFAULT_COLUMNS.map((c, i) =>
+    env.DB.prepare('INSERT INTO projects (id, workspace_id, name, kind, created_at) VALUES (?, ?, ?, ?, ?)').bind(id, params.id, name, kind, ts),
+    ...PROJECT_KINDS[kind].map((c, i) =>
       env.DB.prepare('INSERT INTO columns (id, project_id, name, position, is_done, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(
         newId(),
         id,
@@ -444,7 +482,7 @@ route('POST', '/api/workspaces/:id/projects', async ({ env, user, params, body }
       ),
     ),
   ]);
-  return json({ project: { id, name, total: 0, done: 0 } }, 201);
+  return json({ project: { id, name, kind, total: 0, done: 0 } }, 201);
 });
 
 // метки пространства
@@ -487,7 +525,7 @@ route('GET', '/api/projects/:id', async ({ env, user, params }) => {
     env.DB.prepare('SELECT id, name, color FROM labels WHERE workspace_id = ? ORDER BY created_at').bind(project.workspace_id).all(),
   ]);
   return json({
-    project: { id: project.id, name: project.name, workspace_id: project.workspace_id, role: project.role },
+    project: { id: project.id, name: project.name, kind: project.kind, workspace_id: project.workspace_id, role: project.role },
     columns: columns.results.map((c) => ({ ...c, is_done: !!c.is_done })),
     tasks: tasks.results.map(shapeTask),
     members: members.results,
@@ -584,15 +622,17 @@ route('POST', '/api/projects/:id/tasks', async ({ env, user, params, body }) => 
   const priority = body.priority === undefined ? 0 : validatePriority(body.priority);
   const dueDate = validateDueDate(body.due_date);
   const assigneeId = await validateAssignee(env, project.workspace_id, body.assignee_id);
+  const taskType = body.task_type === undefined ? 'task' : validateTaskType(body.task_type);
+  const estimate = body.estimate_min === undefined ? null : validateEstimate(body.estimate_min);
 
   const position = await nextPosition(env, 'tasks', 'column_id', columnId);
   const id = newId();
   const ts = now();
   await env.DB.prepare(
-    `INSERT INTO tasks (id, project_id, column_id, title, description, priority, assignee_id, due_date, position, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, project_id, column_id, title, description, priority, assignee_id, due_date, position, created_by, created_at, updated_at, task_type, estimate_min)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, params.id, columnId, title, description, priority, assigneeId, dueDate, position, user.id, ts, ts)
+    .bind(id, params.id, columnId, title, description, priority, assigneeId, dueDate, position, user.id, ts, ts, taskType, estimate)
     .run();
   return json({ task: await loadTask(env, id) }, 201);
 });
@@ -614,6 +654,8 @@ route('PATCH', '/api/tasks/:id', async ({ env, user, params, body }) => {
   if (body.due_date !== undefined) set('due_date', validateDueDate(body.due_date));
   if (body.assignee_id !== undefined) set('assignee_id', await validateAssignee(env, task.workspace_id, body.assignee_id));
   if (body.position !== undefined) set('position', validatePosition(body.position));
+  if (body.task_type !== undefined) set('task_type', validateTaskType(body.task_type));
+  if (body.estimate_min !== undefined) set('estimate_min', validateEstimate(body.estimate_min));
   if (!sets.length) fail(400, 'нечего обновлять');
 
   set('updated_at', now());
@@ -720,6 +762,257 @@ route('POST', '/api/tasks/:id/comments', async ({ env, user, params, body }) => 
     .bind(id, params.id, user.id, text, ts)
     .run();
   return json({ comment: { id, body: text, created_at: ts, user_id: user.id, author: user.name } }, 201);
+});
+
+
+// ---------- трекер времени ----------
+
+async function stopRunning(env, userId) {
+  const running = await env.DB.prepare('SELECT id, started_at FROM time_entries WHERE user_id = ? AND ended_at IS NULL').bind(userId).all();
+  const ts = now();
+  for (const r of running.results) {
+    const seconds = Math.max(0, Math.round((ts - r.started_at) / 1000));
+    await env.DB.prepare('UPDATE time_entries SET ended_at = ?, seconds = ? WHERE id = ?').bind(ts, seconds, r.id).run();
+  }
+  return running.results.length;
+}
+
+route('GET', '/api/timer', async ({ env, user }) => {
+  const entry = await env.DB.prepare(
+    `SELECT te.id, te.task_id, te.started_at, t.title AS task_title, t.project_id
+     FROM time_entries te JOIN tasks t ON t.id = te.task_id
+     WHERE te.user_id = ? AND te.ended_at IS NULL`,
+  )
+    .bind(user.id)
+    .first();
+  return json({ entry: entry || null, server_time: now() });
+});
+
+route('POST', '/api/tasks/:id/timer/start', async ({ env, user, params }) => {
+  const task = await taskContext(env, params.id, user.id);
+  await stopRunning(env, user.id);
+  const id = newId();
+  const ts = now();
+  await env.DB.prepare('INSERT INTO time_entries (id, task_id, user_id, started_at) VALUES (?, ?, ?, ?)').bind(id, params.id, user.id, ts).run();
+  return json({ entry: { id, task_id: params.id, started_at: ts, task_title: task.title, project_id: task.project_id }, server_time: ts }, 201);
+});
+
+route('POST', '/api/timer/stop', async ({ env, user }) => {
+  const stopped = await stopRunning(env, user.id);
+  return json({ stopped });
+});
+
+route('GET', '/api/tasks/:id/time', async ({ env, user, params }) => {
+  await taskContext(env, params.id, user.id);
+  const { results } = await env.DB.prepare(
+    `SELECT te.id, te.user_id, u.name AS author, te.started_at, te.ended_at, te.seconds, te.note
+     FROM time_entries te LEFT JOIN users u ON u.id = te.user_id
+     WHERE te.task_id = ? ORDER BY te.started_at DESC LIMIT 50`,
+  )
+    .bind(params.id)
+    .all();
+  const total = results.reduce((sum, e) => sum + (e.ended_at ? e.seconds : 0), 0);
+  return json({ entries: results, total_sec: total });
+});
+
+route('POST', '/api/tasks/:id/time', async ({ env, user, params, body }) => {
+  await taskContext(env, params.id, user.id);
+  const minutes = body.minutes;
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) fail(400, 'время: от 1 до 1440 минут');
+  const note = body.note === undefined ? '' : cleanString(body.note, 'заметка', { max: 200, allowEmpty: true });
+  const id = newId();
+  const ts = now();
+  await env.DB.prepare('INSERT INTO time_entries (id, task_id, user_id, started_at, ended_at, seconds, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, params.id, user.id, ts - minutes * 60000, ts, minutes * 60, note)
+    .run();
+  return json({ entry: { id, user_id: user.id, author: user.name, started_at: ts - minutes * 60000, ended_at: ts, seconds: minutes * 60, note } }, 201);
+});
+
+route('DELETE', '/api/time/:id', async ({ env, user, params }) => {
+  const r = await env.DB.prepare('DELETE FROM time_entries WHERE id = ? AND user_id = ?').bind(params.id, user.id).run();
+  if (!r.meta.changes) fail(404, 'запись не найдена');
+  return json({ ok: true });
+});
+
+route('GET', '/api/workspaces/:id/time', async ({ env, user, params, req }) => {
+  await requireMember(env, params.id, user.id);
+  const days = Math.min(365, Math.max(1, Number(new URL(req.url).searchParams.get('days')) || 30));
+  const since = now() - days * 24 * 3600 * 1000;
+  const [byUser, byProject, recent] = await Promise.all([
+    env.DB.prepare(
+      `SELECT u.id, u.name, SUM(te.seconds) AS seconds FROM time_entries te
+       JOIN tasks t ON t.id = te.task_id JOIN projects p ON p.id = t.project_id
+       JOIN users u ON u.id = te.user_id
+       WHERE p.workspace_id = ? AND te.ended_at IS NOT NULL AND te.started_at > ?
+       GROUP BY u.id ORDER BY seconds DESC`,
+    ).bind(params.id, since).all(),
+    env.DB.prepare(
+      `SELECT p.id, p.name, SUM(te.seconds) AS seconds FROM time_entries te
+       JOIN tasks t ON t.id = te.task_id JOIN projects p ON p.id = t.project_id
+       WHERE p.workspace_id = ? AND te.ended_at IS NOT NULL AND te.started_at > ?
+       GROUP BY p.id ORDER BY seconds DESC`,
+    ).bind(params.id, since).all(),
+    env.DB.prepare(
+      `SELECT te.id, te.seconds, te.started_at, te.note, u.name AS author, t.title AS task_title, t.project_id
+       FROM time_entries te JOIN tasks t ON t.id = te.task_id JOIN projects p ON p.id = t.project_id
+       JOIN users u ON u.id = te.user_id
+       WHERE p.workspace_id = ? AND te.ended_at IS NOT NULL AND te.started_at > ?
+       ORDER BY te.started_at DESC LIMIT 30`,
+    ).bind(params.id, since).all(),
+  ]);
+  const total = byUser.results.reduce((s, r) => s + r.seconds, 0);
+  return json({ days, total_sec: total, by_user: byUser.results, by_project: byProject.results, recent: recent.results });
+});
+
+// ---------- заметки ----------
+
+async function noteContext(env, noteId, userId) {
+  const note = await env.DB.prepare(
+    `SELECT n.* FROM notes n JOIN members m ON m.workspace_id = n.workspace_id AND m.user_id = ? WHERE n.id = ?`,
+  )
+    .bind(userId, noteId)
+    .first();
+  if (!note) fail(404, 'заметка не найдена');
+  return note;
+}
+
+route('GET', '/api/workspaces/:id/notes', async ({ env, user, params }) => {
+  await requireMember(env, params.id, user.id);
+  const { results } = await env.DB.prepare(
+    `SELECT n.id, n.title, substr(n.body, 1, 140) AS preview, n.updated_at, u.name AS author
+     FROM notes n LEFT JOIN users u ON u.id = n.author_id
+     WHERE n.workspace_id = ? ORDER BY n.updated_at DESC LIMIT 200`,
+  )
+    .bind(params.id)
+    .all();
+  return json({ notes: results });
+});
+
+route('POST', '/api/workspaces/:id/notes', async ({ env, user, params, body }) => {
+  await requireMember(env, params.id, user.id);
+  const title = body.title === undefined ? '' : cleanString(body.title, 'заголовок', { max: 120, allowEmpty: true });
+  const text = body.body === undefined ? '' : cleanString(body.body, 'текст', { max: 20000, allowEmpty: true });
+  const id = newId();
+  const ts = now();
+  await env.DB.prepare('INSERT INTO notes (id, workspace_id, title, body, author_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, params.id, title, text, user.id, ts, ts)
+    .run();
+  return json({ note: { id, title, body: text, updated_at: ts, author: user.name } }, 201);
+});
+
+route('GET', '/api/notes/:id', async ({ env, user, params }) => {
+  const note = await noteContext(env, params.id, user.id);
+  return json({ note });
+});
+
+route('PATCH', '/api/notes/:id', async ({ env, user, params, body }) => {
+  const note = await noteContext(env, params.id, user.id);
+  const title = body.title === undefined ? note.title : cleanString(body.title, 'заголовок', { max: 120, allowEmpty: true });
+  const text = body.body === undefined ? note.body : cleanString(body.body, 'текст', { max: 20000, allowEmpty: true });
+  const ts = now();
+  await env.DB.prepare('UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ?').bind(title, text, ts, params.id).run();
+  return json({ note: { id: params.id, title, body: text, updated_at: ts } });
+});
+
+route('DELETE', '/api/notes/:id', async ({ env, user, params }) => {
+  await noteContext(env, params.id, user.id);
+  await env.DB.prepare('DELETE FROM notes WHERE id = ?').bind(params.id).run();
+  return json({ ok: true });
+});
+
+// ---------- чат пространства ----------
+
+route('GET', '/api/workspaces/:id/messages', async ({ env, user, params, req }) => {
+  await requireMember(env, params.id, user.id);
+  const after = Number(new URL(req.url).searchParams.get('after')) || 0;
+  const q = after
+    ? env.DB.prepare(
+        `SELECT m.id, m.body, m.created_at, m.user_id, u.name AS author FROM messages m LEFT JOIN users u ON u.id = m.user_id
+         WHERE m.workspace_id = ? AND m.created_at > ? ORDER BY m.created_at LIMIT 200`,
+      ).bind(params.id, after)
+    : env.DB.prepare(
+        `SELECT * FROM (SELECT m.id, m.body, m.created_at, m.user_id, u.name AS author FROM messages m LEFT JOIN users u ON u.id = m.user_id
+         WHERE m.workspace_id = ? ORDER BY m.created_at DESC LIMIT 60) ORDER BY created_at`,
+      ).bind(params.id);
+  const { results } = await q.all();
+  return json({ messages: results, server_time: now() });
+});
+
+route('POST', '/api/workspaces/:id/messages', async ({ env, user, params, body }) => {
+  await requireMember(env, params.id, user.id);
+  const text = cleanString(body.body, 'сообщение', { max: 2000 });
+  const id = newId();
+  const ts = now();
+  await env.DB.prepare('INSERT INTO messages (id, workspace_id, user_id, body, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(id, params.id, user.id, text, ts)
+    .run();
+  return json({ message: { id, body: text, created_at: ts, user_id: user.id, author: user.name } }, 201);
+});
+
+// ---------- диск ----------
+// файлы лежат в d1 (до 1 мб на файл); когда включится r2, хранилище можно сменить без изменения api
+
+async function fileContext(env, fileId, userId) {
+  const file = await env.DB.prepare(
+    `SELECT f.*, m.role FROM files f JOIN members m ON m.workspace_id = f.workspace_id AND m.user_id = ? WHERE f.id = ?`,
+  )
+    .bind(userId, fileId)
+    .first();
+  if (!file) fail(404, 'файл не найден');
+  return file;
+}
+
+route('GET', '/api/workspaces/:id/files', async ({ env, user, params }) => {
+  await requireMember(env, params.id, user.id);
+  const { results } = await env.DB.prepare(
+    `SELECT f.id, f.name, f.mime, f.size, f.created_at, f.uploaded_by, u.name AS author
+     FROM files f LEFT JOIN users u ON u.id = f.uploaded_by WHERE f.workspace_id = ? ORDER BY f.created_at DESC LIMIT 300`,
+  )
+    .bind(params.id)
+    .all();
+  const used = results.reduce((s, f) => s + f.size, 0);
+  return json({ files: results, used, limit: MAX_WORKSPACE_FILES_BYTES, max_file: MAX_FILE_BYTES });
+});
+
+route('POST', '/api/workspaces/:id/files', async ({ env, user, params, body }) => {
+  await requireMember(env, params.id, user.id);
+  const name = cleanString(body.name, 'имя файла', { max: 150 }).replace(/[\\/]/g, '_');
+  const mime = typeof body.mime === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(body.mime) ? body.mime : 'application/octet-stream';
+  const data = typeof body.data === 'string' ? body.data : '';
+  if (!data || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) fail(400, 'пустой или повреждённый файл');
+  const size = Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+  if (size > MAX_FILE_BYTES) fail(413, 'файл больше 1 мб');
+  const used = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS s FROM files WHERE workspace_id = ?').bind(params.id).first();
+  if (used.s + size > MAX_WORKSPACE_FILES_BYTES) fail(413, 'место в пространстве закончилось (20 мб)');
+  const id = newId();
+  const ts = now();
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO files (id, workspace_id, name, mime, size, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, params.id, name, mime, size, user.id, ts),
+    env.DB.prepare('INSERT INTO file_blobs (file_id, data) VALUES (?, ?)').bind(id, data),
+  ]);
+  return json({ file: { id, name, mime, size, created_at: ts, uploaded_by: user.id, author: user.name } }, 201);
+});
+
+route('GET', '/api/files/:id/download', async ({ env, user, params }) => {
+  const file = await fileContext(env, params.id, user.id);
+  const blob = await env.DB.prepare('SELECT data FROM file_blobs WHERE file_id = ?').bind(params.id).first();
+  if (!blob) fail(404, 'файл не найден');
+  const bin = Uint8Array.from(atob(blob.data), (c) => c.charCodeAt(0));
+  return new Response(bin, {
+    headers: {
+      'content-type': file.mime,
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'private, no-store',
+    },
+  });
+});
+
+route('DELETE', '/api/files/:id', async ({ env, user, params }) => {
+  const file = await fileContext(env, params.id, user.id);
+  if (file.uploaded_by !== user.id && file.role !== 'owner') fail(403, 'удалить файл может его автор или владелец');
+  await env.DB.prepare('DELETE FROM files WHERE id = ?').bind(params.id).run();
+  return json({ ok: true });
 });
 
 // ---------- вход ----------
