@@ -100,7 +100,7 @@ async function currentUser(req, env) {
   const token = getToken(req);
   if (!token) return null;
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.created_at, u.trial_ends_at, u.plan, u.email_verified_at FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.email, u.name, u.created_at, u.trial_ends_at, u.plan, u.email_verified_at, u.notify_assigned, u.notify_mentioned, u.notify_due FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )
     .bind(await sha256(token), now())
@@ -112,7 +112,7 @@ async function currentUser(req, env) {
 function effectivePlan(u) {
   return u.plan === 'start' && u.trial_ends_at && u.trial_ends_at > now() ? 'team' : u.plan || 'start';
 }
-const shapeUser = (u) => ({ id: u.id, email: u.email, name: u.name, created_at: u.created_at, trial_ends_at: u.trial_ends_at || null, plan: u.plan || 'start', effective_plan: effectivePlan(u), email_verified: !!u.email_verified_at });
+const shapeUser = (u) => ({ id: u.id, email: u.email, name: u.name, created_at: u.created_at, trial_ends_at: u.trial_ends_at || null, plan: u.plan || 'start', effective_plan: effectivePlan(u), email_verified: !!u.email_verified_at, notify: { assigned: u.notify_assigned !== 0, mentioned: u.notify_mentioned !== 0, due: u.notify_due !== 0 } });
 const PLAN_MEMBERS = { start: 3, team: 30, business: Infinity };
 
 async function createSession(env, userId) {
@@ -417,7 +417,7 @@ route(
   async ({ env, body }) => {
     const email = cleanString(body.email, 'email', { max: 120 }).toLowerCase();
     const password = cleanString(body.password, 'пароль', { min: 1, max: 200 });
-    const user = await env.DB.prepare('SELECT id, email, name, created_at, trial_ends_at, plan, email_verified_at, pass_hash, pass_salt FROM users WHERE email = ?')
+    const user = await env.DB.prepare('SELECT id, email, name, created_at, trial_ends_at, plan, email_verified_at, notify_assigned, notify_mentioned, notify_due, pass_hash, pass_salt FROM users WHERE email = ?')
       .bind(email)
       .first();
     // хешируем в любом случае, чтобы время ответа не выдавало существование email
@@ -492,6 +492,10 @@ route('POST', '/api/auth/password', async ({ env, req, user, body }) => {
 // ---------- сброс пароля по почте (Resend) ----------
 
 async function sendMail(env, to, subject, html) {
+  if (env.MAIL_MOCK) {
+    (globalThis.__outbox ||= []).push({ to, subject, html });
+    return true;
+  }
   if (!env.RESEND_API_KEY) {
     console.error('почта не настроена: нет RESEND_API_KEY, письмо не отправлено');
     return false;
@@ -799,6 +803,287 @@ route(
   { auth: false },
 );
 
+// ---------- письма-уведомления ----------
+
+const DEFAULT_APP = 'https://tasqly.wsmp.workers.dev';
+const appUrl = (env, req) => String(env.APP_URL || (req ? new URL(req.url).origin : DEFAULT_APP)).replace(/\/$/, '');
+
+function mailLayout(base, { title, lead, items = [], href, hrefText }) {
+  const list = items.length ? `<ul style="margin:0 0 16px;padding-left:18px;color:#333">${items.map((x) => `<li style="margin:4px 0">${x}</li>`).join('')}</ul>` : '';
+  return `<div style="font-family:system-ui,sans-serif;max-width:480px;line-height:1.5;color:#111"><h2 style="margin:0 0 12px">${escHtml(title)}</h2><p style="margin:0 0 14px">${lead}</p>${list}<p><a href="${href}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600">${escHtml(hrefText)}</a></p><p style="color:#666;font-size:13px">Эти письма можно отключить в <a href="${base}/panel/#/profile" style="color:#666">профиле</a>.</p></div>`;
+}
+
+// письмо уходит, только если у человека подтверждена почта и включён нужный переключатель
+const NOTICE_FLAGS = new Set(['notify_assigned', 'notify_mentioned', 'notify_due']);
+async function sendNotice(env, userId, flag, subject, build) {
+  try {
+    if (!NOTICE_FLAGS.has(flag)) return;
+    const u = await env.DB.prepare(`SELECT email, name, email_verified_at, ${flag} AS enabled FROM users WHERE id = ?`).bind(userId).first();
+    if (!u || !u.email_verified_at || !u.enabled) return;
+    await sendMail(env, u.email, subject, build(u));
+  } catch (e) {
+    console.error('notice failed', e);
+  }
+}
+const later = (ctx, promise) => (ctx && ctx.waitUntil ? ctx.waitUntil(promise) : promise);
+
+function noticeAssigned(env, ctx, req, { task, actor, assigneeId }) {
+  if (!assigneeId || assigneeId === actor.id) return;
+  later(ctx, (async () => {
+    const proj = await env.DB.prepare('SELECT name FROM projects WHERE id = ?').bind(task.project_id).first();
+    const base = appUrl(env, req);
+    await sendNotice(env, assigneeId, 'notify_assigned', `Тебе назначили задачу: ${task.title}`, (u) =>
+      mailLayout(base, {
+        title: 'Тебе назначили задачу',
+        lead: `Привет, ${escHtml(u.name)}! Задача <b>${escHtml(task.title)}</b>${proj ? ` в проекте «${escHtml(proj.name)}»` : ''} теперь на тебе. Назначил: ${escHtml(actor.name)}.`,
+        items: task.due_date ? [`Срок: ${escHtml(task.due_date)}`] : [],
+        href: `${base}/panel/#/p/${task.project_id}`,
+        hrefText: 'Открыть проект',
+      }));
+  })());
+}
+
+function noticeMentioned(env, ctx, req, { task, actor, people, text }) {
+  const base = appUrl(env, req);
+  for (const p of people) {
+    later(ctx, sendNotice(env, p.id, 'notify_mentioned', `Тебя упомянули в задаче «${task.title}»`, (u) =>
+      mailLayout(base, {
+        title: 'Тебя упомянули в комментарии',
+        lead: `Привет, ${escHtml(u.name)}! ${escHtml(actor.name)} упомянул тебя в задаче <b>${escHtml(task.title)}</b>:`,
+        items: [escHtml(text.length > 300 ? text.slice(0, 300) + '…' : text)],
+        href: `${base}/panel/#/p/${task.project_id}`,
+        hrefText: 'Открыть проект',
+      })));
+  }
+}
+
+// утренний дайджест: задачи со сроком сегодня или завтра; каждая задача напоминается один раз
+async function runDueDigest(env) {
+  const shift = Date.now() + 5 * 3600_000; // Казахстан, UTC+5
+  const iso = (t) => new Date(t).toISOString().slice(0, 10);
+  const today = iso(shift);
+  const tomorrow = iso(shift + 86400000);
+  const { results } = await env.DB.prepare(
+    `SELECT t.id, t.title, t.due_date, t.project_id, p.name AS project, u.id AS uid, u.email, u.name AS uname
+     FROM tasks t JOIN projects p ON p.id = t.project_id JOIN columns c ON c.id = t.column_id JOIN users u ON u.id = t.assignee_id
+     WHERE c.is_done = 0 AND t.due_date IN (?1, ?2) AND u.notify_due = 1 AND u.email_verified_at IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM due_notices n WHERE n.task_id = t.id AND n.user_id = u.id AND n.due_date = t.due_date)
+     ORDER BY u.id, t.due_date, t.title`,
+  )
+    .bind(today, tomorrow)
+    .all();
+  const byUser = new Map();
+  for (const r of results) {
+    if (!byUser.has(r.uid)) byUser.set(r.uid, []);
+    byUser.get(r.uid).push(r);
+  }
+  const base = appUrl(env);
+  let mails = 0;
+  for (const [uid, tasks] of byUser) {
+    if (mails >= 90) break; // запас под дневной лимит бесплатного тарифа почты
+    const first = tasks[0];
+    const items = tasks.map((t) => `${t.due_date === today ? 'Сегодня' : 'Завтра'}: <b>${escHtml(t.title)}</b> (${escHtml(t.project)})`);
+    const ok = await sendMail(env, first.email, tasks.length === 1 ? `Срок задачи: ${first.title}` : `Сроки задач: ${tasks.length}`, mailLayout(base, {
+      title: tasks.length === 1 ? 'Скоро срок задачи' : 'Скоро сроки задач',
+      lead: `Привет, ${escHtml(first.uname)}! Вот что у тебя горит:`,
+      items,
+      href: `${base}/panel/`,
+      hrefText: 'Открыть tasqly',
+    }));
+    mails++;
+    if (ok) await env.DB.batch(tasks.map((t) => env.DB.prepare('INSERT OR IGNORE INTO due_notices (task_id, user_id, due_date, sent_at) VALUES (?, ?, ?, ?)').bind(t.id, uid, t.due_date, now())));
+  }
+  return { users: byUser.size, tasks: results.length, mails };
+}
+
+// настройки писем в профиле
+route('PATCH', '/api/me/notify', async ({ env, user, body }) => {
+  const map = { assigned: 'notify_assigned', mentioned: 'notify_mentioned', due: 'notify_due' };
+  const sets = [];
+  const vals = [];
+  for (const [k, col] of Object.entries(map)) {
+    if (body[k] === undefined) continue;
+    if (typeof body[k] !== 'boolean') fail(400, `поле «${k}» должно быть true или false`);
+    sets.push(`${col} = ?`);
+    vals.push(body[k] ? 1 : 0);
+  }
+  if (!sets.length) fail(400, 'нечего обновлять');
+  await env.DB.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).bind(...vals, user.id).run();
+  const row = await env.DB.prepare('SELECT notify_assigned, notify_mentioned, notify_due FROM users WHERE id = ?').bind(user.id).first();
+  return json({ notify: { assigned: !!row.notify_assigned, mentioned: !!row.notify_mentioned, due: !!row.notify_due } });
+});
+
+// только для тестов (MAIL_MOCK): письма, которые сервис «отправил»
+route(
+  'GET',
+  '/api/debug/outbox',
+  async ({ env, req }) => {
+    if (!env.MAIL_MOCK) fail(404, 'не найдено');
+    const box = globalThis.__outbox || [];
+    if (new URL(req.url).searchParams.get('clear')) globalThis.__outbox = [];
+    return json({ box });
+  },
+  { auth: false },
+);
+
+// ---------- шаблоны проектов ----------
+
+// колонки: [название, готово]; задачи: [номер колонки, название, приоритет, подзадачи]
+const TEMPLATES = {
+  site: {
+    name: 'Запуск сайта',
+    hint: 'Идеи, работа, проверка, готово. Задачи от цели сайта до домена',
+    columns: [['Идеи', 0], ['В работе', 0], ['На проверке', 0], ['Готово', 1]],
+    tasks: [
+      [0, 'Описать цель сайта и аудиторию', 3],
+      [0, 'Собрать примеры сайтов, которые нравятся', 1],
+      [1, 'Согласовать структуру страниц', 2],
+      [1, 'Подготовить тексты и фотографии', 2],
+      [1, 'Сверстать главную страницу', 3, ['Шапка и первый экран', 'Блок с услугами', 'Контакты и подвал']],
+      [2, 'Проверить сайт на телефоне', 2],
+      [2, 'Подключить домен и аналитику', 2],
+    ],
+  },
+  content: {
+    name: 'Контент-план',
+    hint: 'Идеи, написание, согласование, публикация',
+    columns: [['Идеи', 0], ['Пишем', 0], ['На согласовании', 0], ['Опубликовано', 1]],
+    tasks: [
+      [0, 'Придумать 10 тем для постов', 2],
+      [0, 'Определить рубрики и частоту публикаций', 3],
+      [1, 'Написать первый пост', 2, ['Заголовок', 'Текст', 'Картинка']],
+      [1, 'Подобрать иллюстрации и шаблоны', 1],
+      [2, 'Согласовать пост с руководителем', 2],
+      [3, 'Опубликовать пост и ответить на комментарии', 1],
+    ],
+  },
+  sprint: {
+    name: 'Спринт',
+    hint: 'Бэклог, спринт, работа, ревью, готово',
+    columns: [['Бэклог', 0], ['В спринте', 0], ['В работе', 0], ['Ревью', 0], ['Готово', 1]],
+    tasks: [
+      [0, 'Разобрать бэклог и оценить задачи', 2],
+      [1, 'Спланировать спринт: цель и объём', 3, ['Выбрать цель спринта', 'Отобрать задачи', 'Оценить объём']],
+      [1, 'Демо и ретроспектива в конце спринта', 1],
+      [2, 'Первая задача спринта', 2, ['Реализовать', 'Написать проверку', 'Передать на ревью']],
+      [3, 'Ревью кода первой задачи', 2],
+    ],
+  },
+  hire: {
+    name: 'Найм сотрудника',
+    hint: 'Отклики, собеседования, оффер, нанят',
+    columns: [['Отклики', 0], ['Собеседование', 0], ['Оффер', 0], ['Нанят', 1]],
+    tasks: [
+      [0, 'Написать описание вакансии', 3],
+      [0, 'Опубликовать вакансию на сайтах', 2],
+      [1, 'Назначить собеседования', 2],
+      [1, 'Подготовить вопросы для собеседования', 2, ['Опыт и навыки', 'Мотивация', 'Тестовое задание']],
+      [2, 'Отправить оффер выбранному кандидату', 3],
+      [3, 'Подготовить рабочее место и доступы', 2],
+    ],
+  },
+};
+
+route('GET', '/api/templates', async () => json({ templates: Object.entries(TEMPLATES).map(([id, t]) => ({ id, name: t.name, hint: t.hint, columns: t.columns.map((c) => c[0]), tasks: t.tasks.length })) }), { auth: false });
+
+// ---------- импорт проекта (Trello JSON, ClickUp и другие CSV: файл разбирает браузер) ----------
+
+const chunk = (arr, n) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+};
+// несколько строк в одном insert (в D1 не больше 100 параметров на запрос)
+const multiInsert = (env, table, cols, rows) => {
+  const per = Math.max(1, Math.floor(90 / cols.length));
+  return chunk(rows, per).map((part) =>
+    env.DB.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES ${part.map(() => `(${cols.map(() => '?').join(', ')})`).join(', ')}`).bind(...part.flat()),
+  );
+};
+const runInBatches = async (env, stmts, size = 40) => {
+  for (const part of chunk(stmts, size)) await env.DB.batch(part);
+};
+const clip = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+route('POST', '/api/workspaces/:id/import', async ({ env, user, params, body }) => {
+  await requireMember(env, params.id, user.id);
+  const name = cleanString(body.name, 'название', { max: 80 });
+  await capCount(env, 'projects', 'workspace_id', params.id, LIMITS.projects_per_workspace, 'проектов в пространстве');
+  const colsIn = Array.isArray(body.columns) ? body.columns : [];
+  const tasksIn = Array.isArray(body.tasks) ? body.tasks : [];
+  if (!colsIn.length) fail(400, 'в файле не нашлось колонок');
+  if (colsIn.length > 20) fail(400, 'колонок больше 20, это слишком много для одного проекта');
+  if (!tasksIn.length) fail(400, 'в файле не нашлось задач');
+  if (tasksIn.length > LIMITS.tasks_per_project) fail(429, `в проекте не больше ${LIMITS.tasks_per_project} задач, в файле их ${tasksIn.length}`);
+
+  const ts = now();
+  const projectId = newId();
+  const colIds = colsIn.map(() => newId());
+  const colRows = colsIn.map((c, i) => [colIds[i], projectId, clip(c && c.name, 40) || `Колонка ${i + 1}`, (i + 1) * 1000, c && c.done ? 1 : 0, ts]);
+
+  // метки: берём существующие по имени, недостающие создаём (до 40 новых за раз)
+  const have = await env.DB.prepare('SELECT id, name FROM labels WHERE workspace_id = ?').bind(params.id).all();
+  const labelByName = new Map(have.results.map((l) => [l.name.toLowerCase(), l.id]));
+  const newLabels = [];
+  const labelId = (l) => {
+    const nm = clip(l && l.name, 30);
+    if (!nm) return null;
+    const key = nm.toLowerCase();
+    if (labelByName.has(key)) return labelByName.get(key);
+    if (newLabels.length >= 40) return null;
+    const id = newId();
+    const color = typeof l.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(l.color) ? l.color.toLowerCase() : '#3e63dd';
+    newLabels.push([id, params.id, nm, color, ts]);
+    labelByName.set(key, id);
+    return id;
+  };
+
+  const taskRows = [];
+  const tlRows = [];
+  const clRows = [];
+  const posByCol = new Map();
+  tasksIn.forEach((t, i) => {
+    const title = clip(t && t.title, 200);
+    if (!title) return;
+    const ci = Number.isInteger(t.column) && t.column >= 0 && t.column < colsIn.length ? t.column : 0;
+    const pos = (posByCol.get(ci) || 0) + 1000;
+    posByCol.set(ci, pos);
+    const id = newId();
+    const due = typeof t.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.due_date) && !Number.isNaN(Date.parse(t.due_date)) ? t.due_date : null;
+    const prio = Number.isInteger(t.priority) && t.priority >= 0 && t.priority <= 3 ? t.priority : 0;
+    taskRows.push([id, projectId, colIds[ci], title, clip(t.description, 5000), prio, due, pos, user.id, ts, ts]);
+    const seen = new Set();
+    for (const l of (Array.isArray(t.labels) ? t.labels : []).slice(0, 10)) {
+      const lid = labelId(l);
+      if (lid && !seen.has(lid)) { seen.add(lid); tlRows.push([id, lid]); }
+    }
+    (Array.isArray(t.checklist) ? t.checklist : []).slice(0, 50).forEach((c, j) => {
+      const text = clip(c && c.text, 200);
+      if (text) clRows.push([newId(), id, text, c.done ? 1 : 0, (j + 1) * 1000, ts]);
+    });
+  });
+  if (!taskRows.length) fail(400, 'в файле не нашлось задач с названиями');
+
+  try {
+    await env.DB.prepare('INSERT INTO projects (id, workspace_id, name, kind, created_at) VALUES (?, ?, ?, ?, ?)').bind(projectId, params.id, name, 'basic', ts).run();
+    await runInBatches(env, [
+      ...multiInsert(env, 'columns', ['id', 'project_id', 'name', 'position', 'is_done', 'created_at'], colRows),
+      ...multiInsert(env, 'labels', ['id', 'workspace_id', 'name', 'color', 'created_at'], newLabels),
+    ]);
+    await runInBatches(env, multiInsert(env, 'tasks', ['id', 'project_id', 'column_id', 'title', 'description', 'priority', 'due_date', 'position', 'created_by', 'created_at', 'updated_at'], taskRows));
+    await runInBatches(env, [
+      ...multiInsert(env, 'task_labels', ['task_id', 'label_id'], tlRows),
+      ...multiInsert(env, 'checklist_items', ['id', 'task_id', 'text', 'done', 'position', 'created_at'], clRows),
+    ]);
+  } catch (e) {
+    await env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(projectId).run().catch(() => {});
+    console.error('import failed', e);
+    fail(500, 'не удалось импортировать, попробуй ещё раз');
+  }
+  await audit(env, params.id, user.id, 'project_created', { name, via: 'import' });
+  return json({ project: { id: projectId, name, kind: 'basic', total: taskRows.length, done: taskRows.filter((r) => colRows.find((c) => c[0] === r[2])[4]).length }, labels_created: newLabels.length }, 201);
+});
+
 // входящие: мои незавершённые задачи и свежие комментарии других людей к моим задачам
 route('GET', '/api/inbox', async ({ env, user }) => {
   const tasks = await env.DB.prepare(
@@ -1077,24 +1362,35 @@ route('POST', '/api/workspaces/:id/projects', async ({ env, user, params, body }
   await requireMember(env, params.id, user.id);
   const name = cleanString(body.name, 'название', { max: 80 });
   await capCount(env, 'projects', 'workspace_id', params.id, LIMITS.projects_per_workspace, 'проектов в пространстве');
-  const kind = validateKind(body.kind);
+  const tpl = body.template ? TEMPLATES[body.template] || fail(400, 'неизвестный шаблон') : null;
+  const kind = tpl ? 'basic' : validateKind(body.kind);
   const id = newId();
   const ts = now();
-  await env.DB.batch([
+  const colDefs = tpl ? tpl.columns.map(([n, d]) => ({ name: n, is_done: d })) : PROJECT_KINDS[kind];
+  const colIds = colDefs.map(() => newId());
+  const stmts = [
     env.DB.prepare('INSERT INTO projects (id, workspace_id, name, kind, created_at) VALUES (?, ?, ?, ?, ?)').bind(id, params.id, name, kind, ts),
-    ...PROJECT_KINDS[kind].map((c, i) =>
-      env.DB.prepare('INSERT INTO columns (id, project_id, name, position, is_done, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(
-        newId(),
-        id,
-        c.name,
-        (i + 1) * 1000,
-        c.is_done,
-        ts,
-      ),
+    ...colDefs.map((c, i) =>
+      env.DB.prepare('INSERT INTO columns (id, project_id, name, position, is_done, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(colIds[i], id, c.name, (i + 1) * 1000, c.is_done, ts),
     ),
-  ]);
-  await audit(env, params.id, user.id, 'project_created', { name });
-  return json({ project: { id, name, kind, total: 0, done: 0 } }, 201);
+  ];
+  let doneCount = 0;
+  if (tpl) {
+    const pos = new Map();
+    tpl.tasks.forEach(([ci, title, prio, subs = []]) => {
+      const tid = newId();
+      const p = (pos.get(ci) || 0) + 1000;
+      pos.set(ci, p);
+      if (tpl.columns[ci][1]) doneCount++;
+      stmts.push(
+        env.DB.prepare('INSERT INTO tasks (id, project_id, column_id, title, description, priority, position, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(tid, id, colIds[ci], title, '', prio, p, user.id, ts, ts),
+        ...subs.map((text, j) => env.DB.prepare('INSERT INTO checklist_items (id, task_id, text, done, position, created_at) VALUES (?, ?, ?, 0, ?, ?)').bind(newId(), tid, text, (j + 1) * 1000, ts)),
+      );
+    });
+  }
+  await env.DB.batch(stmts);
+  await audit(env, params.id, user.id, 'project_created', tpl ? { name, via: 'template' } : { name });
+  return json({ project: { id, name, kind, total: tpl ? tpl.tasks.length : 0, done: doneCount } }, 201);
 });
 
 // метки пространства
@@ -1270,7 +1566,7 @@ route('DELETE', '/api/columns/:id', async ({ env, user, params }) => {
 
 // задачи
 
-route('POST', '/api/projects/:id/tasks', async ({ env, user, params, body }) => {
+route('POST', '/api/projects/:id/tasks', async ({ env, ctx, req, user, params, body }) => {
   const project = await projectContext(env, params.id, user.id);
   const title = cleanString(body.title, 'название', { max: 200 });
   await capCount(env, 'tasks', 'project_id', params.id, LIMITS.tasks_per_project, 'задач в проекте');
@@ -1301,10 +1597,12 @@ route('POST', '/api/projects/:id/tasks', async ({ env, user, params, body }) => 
     .bind(id, params.id, columnId, title, description, priority, assigneeId, dueDate, position, user.id, ts, ts, taskType, estimate, repeat)
     .run();
   await logEvent(env, id, user.id, 'created');
-  return json({ task: await loadTask(env, id) }, 201);
+  const created = await loadTask(env, id);
+  noticeAssigned(env, ctx, req, { task: created, actor: user, assigneeId });
+  return json({ task: created }, 201);
 });
 
-route('PATCH', '/api/tasks/:id', async ({ env, user, params, body }) => {
+route('PATCH', '/api/tasks/:id', async ({ env, ctx, req, user, params, body }) => {
   const task = await taskContext(env, params.id, user.id);
   const sets = [];
   const values = [];
@@ -1384,6 +1682,7 @@ route('PATCH', '/api/tasks/:id', async ({ env, user, params, body }) => {
   if (after.estimate_min !== task.estimate_min) changed.push(['estimate', { from: task.estimate_min, to: after.estimate_min }]);
   if (!spawn && after.repeat !== task.repeat) changed.push(['repeat', { from: task.repeat, to: after.repeat }]);
   for (const [kind, detail] of changed) await logEvent(env, params.id, user.id, kind, detail);
+  if (after.assignee_id !== task.assignee_id) noticeAssigned(env, ctx, req, { task: after, actor: user, assigneeId: after.assignee_id });
   return json({ task: after, spawned });
 });
 
@@ -1497,7 +1796,7 @@ route('GET', '/api/tasks/:id/comments', async ({ env, user, params }) => {
   return json({ comments: results });
 });
 
-route('POST', '/api/tasks/:id/comments', async ({ env, user, params, body }) => {
+route('POST', '/api/tasks/:id/comments', async ({ env, ctx, req, user, params, body }) => {
   const task = await taskContext(env, params.id, user.id);
   const text = cleanString(body.body, 'комментарий', { max: 2000 });
   const id = newId();
@@ -1513,6 +1812,7 @@ route('POST', '/api/tasks/:id/comments', async ({ env, user, params, body }) => 
       .all();
     const hit = people.filter((p) => p.id !== user.id && p.name && lower.includes('@' + p.name.toLowerCase()));
     for (const p of hit) await env.DB.prepare('INSERT OR IGNORE INTO mentions (comment_id, user_id) VALUES (?, ?)').bind(id, p.id).run();
+    if (hit.length) noticeMentioned(env, ctx, req, { task, actor: user, people: hit, text });
   }
   return json({ comment: { id, body: text, created_at: ts, user_id: user.id, author: user.name } }, 201);
 });
@@ -1986,7 +2286,7 @@ route('POST', '/api/tasks/:id/ai/subtasks', async ({ env, user, params }) => {
 
 // ---------- вход ----------
 
-const handle = async (req, env) => {
+const handle = async (req, env, ctx) => {
     try {
       const url = new URL(req.url);
       const method = req.method;
@@ -2033,7 +2333,7 @@ const handle = async (req, env) => {
           }
         }
       }
-      return await match.r.handler({ req, env, params: match.params, body, user });
+      return await match.r.handler({ req, env, ctx, params: match.params, body, user });
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message }, e.status);
       console.error(e);
@@ -2062,6 +2362,7 @@ function withCors(res, origin) {
 
 // ---------- резервные копии ----------
 // раз в сутки по расписанию (cron) все таблицы, кроме сессий, файлов и счётчиков, копируются в kv на 14 дней
+const DIGEST_CRON = '0 3 * * *'; // 08:00 по Астане
 const BACKUP_SKIP = new Set(['sessions', 'file_blobs', 'ai_usage', 'email_verifications', 'password_resets']);
 const BACKUP_TTL = 14 * 24 * 3600;
 async function runBackup(env) {
@@ -2091,9 +2392,13 @@ async function runBackup(env) {
 
 export default {
   async scheduled(event, env, ctx) {
+    if (event.cron === DIGEST_CRON) {
+      ctx.waitUntil(runDueDigest(env).then((r) => console.log('digest', JSON.stringify(r))).catch((e) => console.error('digest failed', e)));
+      return;
+    }
     ctx.waitUntil(runBackup(env).then((r) => console.log('backup', JSON.stringify(r))).catch((e) => console.error('backup failed', e)));
   },
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const origin = allowedOrigin(req, env);
     if (req.method === 'OPTIONS') {
       // предзапрос: отвечаем только разрешённым origin
@@ -2110,6 +2415,6 @@ export default {
         origin,
       );
     }
-    return withCors(await handle(req, env), origin);
+    return withCors(await handle(req, env, ctx), origin);
   },
 };

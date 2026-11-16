@@ -1452,6 +1452,11 @@
 
   // «что нового»: только то, что уже работает; даты не выдумываем, всё сделано в ноябре 2026
   const CHANGELOG = [
+    { title: 'Письма, шаблоны и импорт', date: 'Ноябрь 2026', items: [
+      ['Письма-уведомления.', 'Когда тебе назначили задачу, упомянули в комментарии или срок наступает завтра. Каждое письмо включается и выключается в профиле.'],
+      ['Шаблоны проектов.', 'Запуск сайта, контент-план, спринт и найм: колонки и стартовые задачи уже на месте.'],
+      ['Импорт из Trello и ClickUp.', 'Загрузи файл экспорта (JSON из Trello или CSV из ClickUp), и доски, колонки, метки и задачи появятся в tasqly.'],
+    ] },
     { title: 'Данные и безопасность', date: 'Ноябрь 2026', items: [
       ['Подтверждение почты.', 'Письмо со ссылкой после регистрации, баннер в кабинете и кнопка в профиле.'],
       ['Журнал действий.', 'Владелец и администраторы видят, кто удалял проекты, задачи и файлы, приглашал и убирал людей, менял роли.'],
@@ -1968,6 +1973,20 @@
           h('div', { class: 'progress' }, h('span', { style: `width:${pct}%` }))),
         h('div', { class: 'prof-card' }, h('h2', null, 'Внешний вид'), row('Тема', 'Светлая, тёмная или как в системе', themeSeg)),
         h('div', { class: 'prof-card' },
+          h('h2', null, 'Письма'),
+          user.email_verified ? null : h('p', { class: 'sub', style: 'margin:0 0 6px' }, 'Письма приходят только на подтверждённую почту. Подтверди её по ссылке в письме.'),
+          ...[['assigned', 'Назначили задачу', 'Письмо, когда задачу поручили тебе'], ['mentioned', 'Упомянули в комментарии', 'Когда кто-то написал @твоё имя'], ['due', 'Срок задачи завтра', 'Утром напомним о задачах со сроком сегодня и завтра']].map(([key, title, text]) => {
+            const n = (user.notify || {})[key] !== false;
+            const sw = h('button', { type: 'button', class: `switch${n ? ' on' : ''}`, role: 'switch', 'aria-checked': String(n), 'aria-label': title });
+            sw.addEventListener('click', async () => {
+              const next = sw.getAttribute('aria-checked') !== 'true';
+              sw.classList.toggle('on', next); sw.setAttribute('aria-checked', String(next));
+              try { const res = await api.patch('/api/me/notify', { [key]: next }); state.user.notify = res.notify; }
+              catch (e) { sw.classList.toggle('on', !next); sw.setAttribute('aria-checked', String(!next)); toast(e.message); }
+            });
+            return row(title, text, sw);
+          })),
+        h('div', { class: 'prof-card' },
           h('h2', null, 'Безопасность'),
           row('Пароль', 'Минимум 8 символов', h('button', { class: 'btn ghost small', onclick: openPasswordModal }, 'Сменить')),
           row('Устройства', `${usage.devices} ${plural(usage.devices, 'активная сессия', 'активные сессии', 'активных сессий')}`, othersBtn)),
@@ -2013,21 +2032,198 @@
     );
   }
 
+  // ---------- импорт из Trello (JSON) и ClickUp / других сервисов (CSV) ----------
+  const TRELLO_COLORS = { green: '#4cb782', yellow: '#e5a50a', orange: '#f76808', red: '#e5484d', purple: '#8e4ec6', blue: '#3e63dd', sky: '#00a2c7', lime: '#99d52a', pink: '#d6409f', black: '#62666d' };
+  const TRELLO_COLOR_RU = { green: 'зелёная', yellow: 'жёлтая', orange: 'оранжевая', red: 'красная', purple: 'фиолетовая', blue: 'синяя', sky: 'голубая', lime: 'лаймовая', pink: 'розовая', black: 'чёрная' };
+  const DONE_RE = /готов|done|complete|сделан|выполнен|закрыт|closed|finished|заверш/i;
+  const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  function parseTrello(data) {
+    const lists = (data.lists || []).filter((l) => !l.closed).sort((a, b) => a.pos - b.pos);
+    if (!lists.length) throw new Error('в файле нет открытых списков');
+    const colIndex = new Map(lists.map((l, i) => [l.id, i]));
+    const checks = new Map();
+    for (const cl of data.checklists || []) {
+      const items = (cl.checkItems || []).slice().sort((a, b) => a.pos - b.pos).map((i) => ({ text: i.name, done: i.state === 'complete' }));
+      checks.set(cl.idCard, [...(checks.get(cl.idCard) || []), ...items]);
+    }
+    const tasks = (data.cards || [])
+      .filter((c) => !c.closed && colIndex.has(c.idList))
+      .sort((a, b) => a.pos - b.pos)
+      .map((c) => ({
+        title: c.name,
+        column: colIndex.get(c.idList),
+        description: c.desc || '',
+        due_date: c.due ? localDay(new Date(c.due)) : null,
+        labels: (c.labels || []).map((l) => ({ name: l.name || TRELLO_COLOR_RU[l.color] || 'метка', color: TRELLO_COLORS[l.color] })).filter((l) => l.name),
+        checklist: checks.get(c.id) || [],
+      }));
+    return { name: data.name || 'Импорт из Trello', columns: lists.map((l) => ({ name: l.name, done: DONE_RE.test(l.name) })), tasks };
+  }
+
+  // разбор csv с кавычками и переносами строк внутри ячеек
+  function parseCsv(text) {
+    text = text.replace(/^﻿/, '');
+    const first = text.split('\n', 1)[0];
+    const sep = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ';' : ',';
+    const rows = [];
+    let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === sep) { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); cell = '';
+        if (row.some((x) => x !== '')) rows.push(row);
+        row = [];
+      } else cell += ch;
+    }
+    row.push(cell);
+    if (row.some((x) => x !== '')) rows.push(row);
+    return rows;
+  }
+
+  function parseDateLoose(v) {
+    v = (v || '').trim();
+    if (!v) return null;
+    if (/^\d{10,13}$/.test(v)) return localDay(new Date(v.length === 10 ? +v * 1000 : +v));
+    if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+    let m = v.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // американский порядок, как в ClickUp
+    if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+    const t = Date.parse(v.replace(/(\d)(st|nd|rd|th)\b/, '$1'));
+    return Number.isNaN(t) ? null : localDay(new Date(t));
+  }
+
+  function parseClickupCsv(text, fileName) {
+    const rows = parseCsv(text);
+    if (rows.length < 2) throw new Error('в таблице нет задач');
+    const head = rows[0].map((x) => x.trim().toLowerCase());
+    const find = (...names) => { for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; } return -1; };
+    const iName = find('task name', 'name', 'title', 'название', 'задача');
+    if (iName < 0) throw new Error('не нашёл колонку с названием задачи («Task Name»)');
+    const iStatus = find('status', 'статус', 'list', 'список');
+    const iDesc = find('task content', 'description', 'text content', 'описание');
+    const iDue = find('due date', 'due date text', 'срок', 'due');
+    const iPrio = find('priority', 'приоритет');
+    const iTags = find('tags', 'теги', 'метки', 'labels');
+    const iId = find('task id', 'id');
+    const iParent = find('parent id', 'parent');
+    const cols = [];
+    const colOf = (s) => { s = (s || '').trim() || 'Без статуса'; let i = cols.findIndex((c) => c.name.toLowerCase() === s.toLowerCase()); if (i < 0) { cols.push({ name: s.slice(0, 40), done: DONE_RE.test(s) }); i = cols.length - 1; } return i; };
+    const PRIO = { urgent: 3, high: 3, normal: 2, medium: 2, low: 1, срочный: 3, высокий: 3, средний: 2, обычный: 2, низкий: 1 };
+    const byId = new Map();
+    const tasks = [];
+    const subs = [];
+    for (const r of rows.slice(1)) {
+      const title = (r[iName] || '').trim();
+      if (!title) continue;
+      const parent = iParent >= 0 ? (r[iParent] || '').trim() : '';
+      if (parent) { subs.push({ parent, text: title, done: DONE_RE.test(r[iStatus] || '') }); continue; }
+      const tags = iTags >= 0 ? (r[iTags] || '').replace(/^\[|\]$/g, '').split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean).slice(0, 10) : [];
+      const t = {
+        title,
+        column: iStatus >= 0 ? colOf(r[iStatus]) : colOf('Задачи'),
+        description: iDesc >= 0 && r[iDesc] !== 'null' ? (r[iDesc] || '').trim() : '',
+        due_date: iDue >= 0 ? parseDateLoose(r[iDue]) : null,
+        priority: iPrio >= 0 ? PRIO[(r[iPrio] || '').trim().toLowerCase()] || 0 : 0,
+        labels: tags.map((name) => ({ name })),
+        checklist: [],
+      };
+      tasks.push(t);
+      if (iId >= 0 && r[iId]) byId.set(r[iId].trim(), t);
+    }
+    for (const s of subs) { const p = byId.get(s.parent); if (p && p.checklist.length < 50) p.checklist.push({ text: s.text, done: s.done }); }
+    if (!cols.length) cols.push({ name: 'Задачи', done: false });
+    return { name: (fileName || '').replace(/\.[^.]+$/, '') || 'Импорт из CSV', columns: cols, tasks };
+  }
+
+  function parseImportFile(text, fileName) {
+    const t = text.trim();
+    if (t.startsWith('{')) {
+      let data;
+      try { data = JSON.parse(t); } catch { throw new Error('файл не похож на экспорт Trello: это не JSON'); }
+      if (!Array.isArray(data.lists) || !Array.isArray(data.cards)) throw new Error('в этом JSON нет досок Trello (нужны списки и карточки)');
+      return parseTrello(data);
+    }
+    return parseClickupCsv(text, fileName);
+  }
+
+  function openImport(workspaceId) {
+    const overlay = h('div', { class: 'overlay' });
+    const close = () => closeOverlay(overlay);
+    overlay.addEventListener('tq-close', close);
+    overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+    let parsed = null;
+    const nameIn = h('input', { type: 'text', maxlength: 80, placeholder: 'Название проекта', 'aria-label': 'Название проекта' });
+    const info = h('div', { class: 'imp-info', hidden: true });
+    const go = h('button', { class: 'btn', disabled: true }, 'Импортировать');
+    const fileIn = h('input', { type: 'file', accept: '.json,.csv,application/json,text/csv', 'aria-label': 'Файл экспорта' });
+    fileIn.addEventListener('change', async () => {
+      parsed = null; go.disabled = true; info.hidden = false; info.className = 'imp-info';
+      const f = fileIn.files[0];
+      if (!f) { info.hidden = true; return; }
+      if (f.size > 8 * 1024 * 1024) { info.className = 'imp-info bad'; info.textContent = 'Файл больше 8 МБ, это слишком много.'; return; }
+      try {
+        parsed = parseImportFile(await f.text(), f.name);
+        if (!parsed.tasks.length) throw new Error('в файле не нашлось задач');
+        if (!nameIn.value.trim()) nameIn.value = parsed.name.slice(0, 80);
+        const labels = new Set(parsed.tasks.flatMap((t) => t.labels.map((l) => l.name.toLowerCase()))).size;
+        info.textContent = `Нашёл: колонок ${parsed.columns.length}, задач ${parsed.tasks.length}${labels ? `, меток ${labels}` : ''}. Колонки: ${parsed.columns.map((c) => c.name).join(', ')}.`;
+        go.disabled = false;
+      } catch (e) { parsed = null; info.className = 'imp-info bad'; info.textContent = e.message; }
+    });
+    go.addEventListener('click', async () => {
+      if (!parsed) return;
+      go.disabled = true; go.textContent = 'Импортирую…';
+      try {
+        const { project } = await api.post(`/api/workspaces/${workspaceId}/import`, { ...parsed, name: nameIn.value.trim() || parsed.name });
+        cacheClear(); toast('Готово, проект создан');
+        close(); location.hash = `#/p/${project.id}`;
+      } catch (e) { toast(e.message); go.disabled = false; go.textContent = 'Импортировать'; }
+    });
+    overlay.append(h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Импорт проекта' },
+      h('div', { class: 'head' }, h('h1', { style: 'font-size:18px;flex:1;margin:0' }, 'Импорт проекта'), h('button', { class: 'icon-btn', onclick: close, 'aria-label': 'Закрыть' }, '✕')),
+      h('div', { class: 'imp-how' },
+        h('p', null, h('b', null, 'Trello'), ': меню доски, «Печать и экспорт», «Экспорт в JSON». Загрузи скачанный файл.'),
+        h('p', null, h('b', null, 'ClickUp'), ': в списке нажми «Экспорт» и выбери CSV. Загрузи скачанный файл.')),
+      h('label', { class: 'field' }, 'Файл экспорта'), fileIn,
+      info,
+      h('label', { class: 'field' }, 'Название проекта'), nameIn,
+      h('div', { class: 'row', style: 'margin-top:14px;justify-content:flex-end' }, go)));
+    document.body.append(overlay);
+  }
+
   function panelProjects(id, { workspace, members, projects, roles = [], default_roles: defRoles = {} }) {
     const nameInput = h('input', { type: 'text', placeholder: 'Название проекта', maxlength: 80 });
     let kind = 'basic';
+    let tpl = null;
+    let templates = [];
     const kindBox = h('div', { class: 'kinds' });
-    const paintKinds = () =>
+    const tplBox = h('div', { class: 'kinds', hidden: true });
+    const paintKinds = () => {
       kindBox.replaceChildren(
         ...Object.entries(KINDS).map(([k, v]) =>
-          h('button', { type: 'button', class: `kind${k === kind ? ' on' : ''}`, onclick: () => ((kind = k), paintKinds()) }, h('b', null, v.name), h('span', null, v.hint)),
+          h('button', { type: 'button', class: `kind${!tpl && k === kind ? ' on' : ''}`, onclick: () => ((kind = k), (tpl = null), paintKinds()) }, h('b', null, v.name), h('span', null, v.hint)),
         ),
       );
+      tplBox.hidden = !templates.length;
+      tplBox.replaceChildren(
+        ...templates.map((t) =>
+          h('button', { type: 'button', class: `kind${tpl === t.id ? ' on' : ''}`, onclick: () => { tpl = tpl === t.id ? null : t.id; paintKinds(); } }, h('b', null, t.name), h('span', null, `${t.columns.join(' · ')}. ${t.tasks} стартовых задач`)),
+        ),
+      );
+    };
     paintKinds();
+    api.get('/api/templates').then((r) => { templates = r.templates; paintKinds(); }).catch(() => {});
     const create = async () => {
       if (!nameInput.value.trim()) return;
       try {
-        const { project } = await api.post(`/api/workspaces/${id}/projects`, { name: nameInput.value, kind });
+        const { project } = await api.post(`/api/workspaces/${id}/projects`, tpl ? { name: nameInput.value, template: tpl } : { name: nameInput.value, kind });
         location.hash = `#/p/${project.id}`;
       } catch (e) {
         toast(e.message);
@@ -2152,8 +2348,10 @@
           )
         : h('div', { class: 'card empty' }, 'Проектов пока нет. Создай первый ниже.'),
       h('div', { class: 'spacer' }),
-      h('h2', null, 'Новый проект'),
+      h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:12px' }, h('h2', { style: 'margin:0' }, 'Новый проект'), h('button', { class: 'btn ghost small', onclick: () => openImport(id) }, 'Импорт из Trello или ClickUp')),
       kindBox,
+      h('h3', { class: 'tpl-title', hidden: false }, 'Или готовая заготовка с задачами'),
+      tplBox,
       h('div', { class: 'row', style: 'margin-top:10px' }, nameInput, h('button', { class: 'btn', onclick: create }, 'Добавить проект')),
       h('div', { class: 'spacer' }),
       h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:12px' }, h('h2', { style: 'margin:0' }, 'Участники'), isAdmin(workspace.role) ? h('button', { class: 'btn ghost small', onclick: openRoles }, 'Роли') : null),

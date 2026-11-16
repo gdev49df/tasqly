@@ -709,6 +709,118 @@ ok('журнал действий, экспорт данных и удалени
 }
 ok('статус сервиса и конфиг: Google выключен без ключей');
 
+// ---------- письма-уведомления, шаблоны, импорт ----------
+
+const outbox = async (clear) => (await fetch(BASE + '/api/debug/outbox' + (clear ? '?clear=1' : ''))).json();
+{
+  await outbox(true);
+  const boss = client();
+  const bobN = client();
+  const reg1 = await boss('POST', '/api/auth/register', { email: `boss${run}@test.dev`, name: 'Босс', password: 'password123' });
+  const reg2 = await bobN('POST', '/api/auth/register', { email: `exec${run}@test.dev`, name: 'Исполнитель', password: 'password123' });
+  const wsN = (await boss('POST', '/api/workspaces', { name: 'письма' })).data.workspace;
+  await bobN('POST', '/api/workspaces/join', { code: (await boss('GET', `/api/workspaces/${wsN.id}`)).data.workspace.invite_code });
+  const pN = (await boss('POST', `/api/workspaces/${wsN.id}/projects`, { name: 'П' })).data.project;
+  const execId = reg2.data.user.id;
+
+  // почта не подтверждена: письма нет
+  let t = (await boss('POST', `/api/projects/${pN.id}/tasks`, { title: 'Первая', assignee_id: execId })).data.task;
+  assert.equal((await outbox()).box.length, 0, 'без подтверждённой почты письма нет');
+
+  await client()('POST', '/api/auth/verify', { token: reg2.data.debug_verify_token });
+  t = (await boss('POST', `/api/projects/${pN.id}/tasks`, { title: 'Вторая', assignee_id: execId })).data.task;
+  let box = (await outbox(true)).box;
+  assert.equal(box.length, 1);
+  assert.equal(box[0].to, `exec${run}@test.dev`);
+  assert.ok(box[0].subject.includes('Вторая'));
+
+  // назначил сам себе — тишина; перевёл на исполнителя — письмо
+  const t3 = (await boss('POST', `/api/projects/${pN.id}/tasks`, { title: 'Третья' })).data.task;
+  await boss('PATCH', `/api/tasks/${t3.id}`, { assignee_id: reg1.data.user.id });
+  assert.equal((await outbox()).box.length, 0);
+  await boss('PATCH', `/api/tasks/${t3.id}`, { assignee_id: execId });
+  assert.equal((await outbox(true)).box.length, 1);
+
+  // упоминание
+  await boss('POST', `/api/tasks/${t.id}/comments`, { body: 'смотри, @Исполнитель, срочно' });
+  box = (await outbox(true)).box;
+  assert.equal(box.length, 1);
+  assert.ok(box[0].subject.includes('упомянули'));
+
+  // выключатель в профиле
+  let n = await bobN('PATCH', '/api/me/notify', { assigned: false, mentioned: false });
+  assert.equal(n.status, 200);
+  assert.deepEqual(n.data.notify, { assigned: false, mentioned: false, due: true });
+  assert.equal((await bobN('PATCH', '/api/me/notify', { assigned: 'нет' })).status, 400);
+  assert.equal((await bobN('GET', '/api/me')).data.user.notify.assigned, false);
+  await boss('POST', `/api/projects/${pN.id}/tasks`, { title: 'Четвёртая', assignee_id: execId });
+  await boss('POST', `/api/tasks/${t.id}/comments`, { body: '@Исполнитель ещё раз' });
+  assert.equal((await outbox()).box.length, 0, 'выключено — писем нет');
+
+  // дайджест: срок завтра (по Астане), второй запуск не дублирует
+  const tom = new Date(Date.now() + 5 * 3600_000 + 86400000).toISOString().slice(0, 10);
+  await boss('PATCH', `/api/tasks/${t.id}`, { due_date: tom });
+  await outbox(true);
+  await fetch(BASE + '/cdn-cgi/handler/scheduled?cron=0+3+*+*+*');
+  await new Promise((s) => setTimeout(s, 800));
+  box = (await outbox(true)).box;
+  assert.equal(box.length, 1, 'дайджест: одно письмо');
+  assert.ok(box[0].html.includes('Вторая'));
+  await fetch(BASE + '/cdn-cgi/handler/scheduled?cron=0+3+*+*+*');
+  await new Promise((s) => setTimeout(s, 800));
+  assert.equal((await outbox()).box.length, 0, 'повторно ту же задачу не напоминаем');
+}
+ok('письма: назначение, упоминание, дайджест по сроку, выключатели в профиле');
+
+{
+  const c = client();
+  await c('POST', '/api/auth/register', { email: `tpl${run}@test.dev`, name: 'Шаблон', password: 'password123' });
+  const w = (await c('POST', '/api/workspaces', { name: 'шаблоны' })).data.workspace;
+  const list = await client()('GET', '/api/templates');
+  assert.ok(list.data.templates.length >= 3);
+  assert.equal((await c('POST', `/api/workspaces/${w.id}/projects`, { name: 'Х', template: 'нет-такого' })).status, 400);
+  const made = await c('POST', `/api/workspaces/${w.id}/projects`, { name: 'Сайт клиента', template: 'site' });
+  assert.equal(made.status, 201);
+  const board = (await c('GET', `/api/projects/${made.data.project.id}`)).data;
+  assert.equal(board.columns.length, 4);
+  assert.ok(board.tasks.length >= 5);
+  assert.ok(board.columns[3].is_done);
+}
+ok('шаблоны проектов: колонки и стартовые задачи создаются');
+
+{
+  const c = client();
+  await c('POST', '/api/auth/register', { email: `imp${run}@test.dev`, name: 'Импорт', password: 'password123' });
+  const w = (await c('POST', '/api/workspaces', { name: 'импорт' })).data.workspace;
+  const payload = {
+    name: 'Из Trello',
+    columns: [{ name: 'К работе' }, { name: 'Сделано', done: true }],
+    tasks: [
+      { title: 'Карточка 1', column: 0, description: 'текст', labels: [{ name: 'срочно', color: '#ff0000' }], checklist: [{ text: 'пункт', done: true }, { text: 'второй' }], due_date: '2026-12-05', priority: 3 },
+      { title: 'Карточка 2', column: 1, labels: [{ name: 'срочно' }] },
+      { title: '', column: 0 },
+    ],
+  };
+  const im = await c('POST', `/api/workspaces/${w.id}/import`, payload);
+  assert.equal(im.status, 201);
+  assert.equal(im.data.project.total, 2);
+  assert.equal(im.data.project.done, 1);
+  assert.equal(im.data.labels_created, 1, 'одинаковая метка создаётся один раз');
+  const b = (await c('GET', `/api/projects/${im.data.project.id}`)).data;
+  assert.equal(b.columns.length, 2);
+  assert.equal(b.tasks.length, 2);
+  assert.equal((await c('POST', `/api/workspaces/${w.id}/import`, { ...payload, tasks: [] })).status, 400);
+  assert.equal((await c('POST', `/api/workspaces/${w.id}/import`, { ...payload, columns: [] })).status, 400);
+  const big = { name: 'Много', columns: [{ name: 'А' }], tasks: Array.from({ length: 250 }, (_, i) => ({ title: 'з' + i, column: 0, labels: [{ name: 'м' + (i % 5) }], checklist: [{ text: 'a' }, { text: 'b' }] })) };
+  const bi = await c('POST', `/api/workspaces/${w.id}/import`, big);
+  assert.equal(bi.status, 201, JSON.stringify(bi.data));
+  assert.equal(bi.data.project.total, 250);
+  const outsider = client();
+  await outsider('POST', '/api/auth/register', { email: `out${run}@test.dev`, name: 'Чужой', password: 'password123' });
+  assert.equal((await outsider('POST', `/api/workspaces/${w.id}/import`, payload)).status, 404);
+}
+ok('импорт: колонки, задачи, метки, чек-листы, большие файлы, чужим нельзя');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

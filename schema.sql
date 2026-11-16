@@ -10,7 +10,10 @@ CREATE TABLE IF NOT EXISTS users (
   trial_ends_at INTEGER, -- конец пробных 5 дней «Команды», пусто пока не включён
   plan TEXT NOT NULL DEFAULT 'start', -- start, team, business
   email_verified_at INTEGER, -- когда подтверждена почта
-  google_id TEXT -- вход через Google
+  google_id TEXT, -- вход через Google
+  notify_assigned INTEGER NOT NULL DEFAULT 1, -- письма: назначили задачу
+  notify_mentioned INTEGER NOT NULL DEFAULT 1, -- письма: упомянули в комментарии
+  notify_due INTEGER NOT NULL DEFAULT 1 -- письма: срок сегодня или завтра
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_id) WHERE google_id IS NOT NULL;
 
@@ -231,3 +234,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ws ON audit_log(workspace_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS due_notices (
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  due_date TEXT NOT NULL,
+  sent_at INTEGER NOT NULL,
+  PRIMARY KEY (task_id, user_id, due_date)
+);

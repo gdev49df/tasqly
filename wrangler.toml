@@ -27,4 +27,4 @@ binding = "BACKUPS"
 id = "df326e84442f4de3aa1151451388083c"
 
 [triggers]
-crons = ["30 21 * * *"]
+crons = ["30 21 * * *", "0 3 * * *"]
