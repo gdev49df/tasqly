@@ -1747,3 +1747,7 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .prof-row span { color: var(--muted); font-size: 13.5px; }
 .prof-card h2 + .prof-row { padding-top: 0; }
 @media (max-width: 560px) { .prof-hero { flex-direction: column; align-items: flex-start; } .prof-edit { width: 100%; } }
+
+/* v8.6: строка ввода чата — на всю ширину плашки */
+.chat-input { width: 100%; box-sizing: border-box; }
+.chat-input .capsule { flex: 1 1 auto; width: 100%; min-width: 0; box-sizing: border-box; }
