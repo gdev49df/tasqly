@@ -2,11 +2,6 @@ name = "tasqly"
 main = "src/worker.js"
 compatibility_date = "2025-01-01"
 
-# свой домен: cloudflare сам создаст dns-запись (зона w-smp.in должна быть в этом аккаунте)
-routes = [
-  { pattern = "tasqly.w-smp.in", custom_domain = true },
-]
-
 # статика (pwa) отдаётся напрямую, воркер запускается только для /api/*
 [assets]
 directory = "./public"
