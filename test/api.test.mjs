@@ -417,6 +417,20 @@ assert.equal((await client()('POST', '/api/auth/login', { email: `eve${run}@test
 assert.equal((await client()('POST', '/api/auth/login', { email: `eve${run}@test.dev`, password: 'newpassword1' })).status, 200);
 ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
 
+// лимиты на количество объектов
+r = await alice('GET', '/api/limits');
+assert.equal(r.status, 200);
+assert.ok(r.data.limits.notes_per_workspace > 0 && r.data.limits.ai_per_day > 0);
+{
+  const lw = (await alice('POST', '/api/workspaces', { name: 'лимиты' })).data.workspace;
+  const lim = r.data.limits.projects_per_workspace;
+  for (let i = 0; i < lim; i++) assert.equal((await alice('POST', `/api/workspaces/${lw.id}/projects`, { name: `п${i}` })).status, 201);
+  r = await alice('POST', `/api/workspaces/${lw.id}/projects`, { name: 'лишний' });
+  assert.equal(r.status, 429);
+  assert.match(r.data.error, /не больше/);
+}
+ok('лимиты: проекты упираются в потолок, ответ 429 с понятным текстом');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

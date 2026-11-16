@@ -442,7 +442,7 @@
     const close = () => {
       wrap.classList.remove('open');
       wrap.classList.add('closing');
-      setTimeout(() => wrap.remove(), 420);
+      setTimeout(() => wrap.remove(), 520);
     };
     const go = (href) => () => {
       close();
@@ -904,7 +904,7 @@
       const b = tabBtns[tabIdx];
       const ty = b.offsetTop, th = b.offsetHeight;
       if (!indInit || calmMotion) { indY = ty; indH = th; vY = vH = 0; indInit = true; }
-      else { vY = (vY + (ty - indY) * 0.14) * 0.74; vH = (vH + (th - indH) * 0.14) * 0.74; indY += vY; indH += vH; }
+      else { vY = (vY + (ty - indY) * 0.085) * 0.8; vH = (vH + (th - indH) * 0.085) * 0.8; indY += vY; indH += vH; }
       ind.style.transform = `translateY(${indY.toFixed(2)}px)`;
       ind.style.height = `${Math.max(0, indH).toFixed(2)}px`;
       indRaf = (Math.abs(ty - indY) > 0.3 || Math.abs(th - indH) > 0.3 || Math.abs(vY) > 0.08 || Math.abs(vH) > 0.08) ? requestAnimationFrame(stepInd) : 0;
@@ -916,7 +916,11 @@
       const dir = i >= tabIdx ? 1 : -1;
       tabIdx = i;
       tabBtns.forEach((b, j) => { b.classList.toggle('active', j === i); b.setAttribute('aria-selected', String(j === i)); });
-      tabHolder.replaceChildren(h('div', { class: 'ft-view', style: `--dir:${dir}` }, tabsData[i][2]()));
+      const fresh = h('div', { class: 'ft-view', style: `--dir:${dir}` }, tabsData[i][2]());
+      const old = tabHolder.querySelector('.ft-view:not(.leaving)');
+      if (old && !calmMotion) { old.classList.add('leaving'); old.style.setProperty('--dir', String(dir)); setTimeout(() => old.remove(), 500); }
+      else if (old) old.remove();
+      tabHolder.append(fresh);
       runInd();
     }
     selectTab(tabIdx);

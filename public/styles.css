@@ -1477,3 +1477,34 @@ body.ai-full .ai-dock { background: var(--bg); }
 body.ai-full .ai-dock .chat { background: transparent; }
 body.ai-full .ai-dock .capsule { width: 100%; }
 body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right: 20px; }
+
+/* v6.6: «помочь» — та же рисованная волна, что и в логотипе */
+.hi-title em { text-decoration: none; position: relative; display: inline-block; }
+.hi-title em::after { content: ''; position: absolute; left: 0; right: 0; bottom: -.14em; height: .2em; min-height: 7px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='9' viewBox='0 0 128 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.2C12 2 19 7.4 31 4.6S50 1.6 62 5.6 83 7.8 95 3.8s17-1.6 31 .9' fill='none' stroke='%23c6f432' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") no-repeat center / 100% 100%; }
+
+/* v6.7: переключение мягче — старый экран тает, новый плавно подплывает */
+.ft-holder { position: relative; }
+.ft-holder .ft-view { animation: ft-swap .85s cubic-bezier(.22, .8, .3, 1) both; }
+.ft-holder .ft-view.leaving { position: absolute; inset: 0; pointer-events: none; animation: ft-out .45s cubic-bezier(.4, 0, .6, 1) both; }
+@keyframes ft-swap { from { opacity: 0; transform: translateY(calc(var(--dir, 1) * 14px)); } 55% { opacity: 1; } to { opacity: 1; transform: none; } }
+@keyframes ft-out { to { opacity: 0; transform: translateY(calc(var(--dir, 1) * -10px)); } }
+.ft-list button { transition: background .7s cubic-bezier(.22, .8, .3, 1), color .5s; }
+.ft-list button b { transition: color .5s; }
+.ft-list button span { transition: max-height .8s cubic-bezier(.22, .8, .3, 1), opacity .6s ease, margin .6s; }
+.ft-list button:focus:not(:focus-visible) { outline: none; }
+.ft-list button:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+.drawer { transition-duration: .75s; }
+.drawer-wrap.closing .drawer { transition-duration: .5s; }
+
+/* v6.8: выделенная колонка тарифов — нейтральная, лайм только на важном */
+.cmp td:nth-child(3), .cmp thead th:nth-child(3) { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.cmp thead th:nth-child(3) { box-shadow: inset 0 3px 0 var(--lime); }
+.cmp td:nth-child(3).yes { color: var(--text); }
+.cmp td.yes { color: var(--text); }
+
+/* v6.9: подвал на четыре колонки */
+.lf-in { grid-template-columns: minmax(0, 1.8fr) repeat(3, minmax(0, 1fr)); }
+.lf-bottom { max-width: 1120px; margin-left: auto; margin-right: auto; }
+@media (max-width: 900px) { .lf-in { grid-template-columns: repeat(3, minmax(0, 1fr)); } .lf-brand { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .lf-in { grid-template-columns: 1fr 1fr; } }

@@ -424,8 +424,25 @@ route('GET', '/api/workspaces', async ({ env, user }) => {
   return json({ workspaces: results });
 });
 
+// лимиты на количество объектов: защита от мусора и злоупотреблений
+const LIMITS = {
+  ai_per_day: 40,
+  workspaces_per_owner: 10,
+  projects_per_workspace: 30,
+  tasks_per_project: 500,
+  notes_per_workspace: 100,
+  files_per_workspace: 100,
+};
+async function capCount(env, table, col, id, max, what) {
+  const row = await env.DB.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${col} = ?`).bind(id).first();
+  if (row.c >= max) fail(429, `достигнут лимит: не больше ${max} ${what}`);
+}
+
+route('GET', '/api/limits', async () => json({ limits: LIMITS }));
+
 route('POST', '/api/workspaces', async ({ env, user, body }) => {
   const name = cleanString(body.name, 'название', { max: 80 });
+  await capCount(env, 'workspaces', 'owner_id', user.id, LIMITS.workspaces_per_owner, 'пространств на аккаунт');
   const id = newId();
   const ts = now();
   await env.DB.batch([
@@ -484,6 +501,7 @@ route('GET', '/api/workspaces/:id', async ({ env, user, params }) => {
 route('POST', '/api/workspaces/:id/projects', async ({ env, user, params, body }) => {
   await requireMember(env, params.id, user.id);
   const name = cleanString(body.name, 'название', { max: 80 });
+  await capCount(env, 'projects', 'workspace_id', params.id, LIMITS.projects_per_workspace, 'проектов в пространстве');
   const kind = validateKind(body.kind);
   const id = newId();
   const ts = now();
@@ -627,6 +645,7 @@ route('DELETE', '/api/columns/:id', async ({ env, user, params }) => {
 route('POST', '/api/projects/:id/tasks', async ({ env, user, params, body }) => {
   const project = await projectContext(env, params.id, user.id);
   const title = cleanString(body.title, 'название', { max: 200 });
+  await capCount(env, 'tasks', 'project_id', params.id, LIMITS.tasks_per_project, 'задач в проекте');
   let columnId = body.column_id;
   if (columnId === undefined) {
     const first = await env.DB.prepare('SELECT id FROM columns WHERE project_id = ? ORDER BY position LIMIT 1').bind(params.id).first();
@@ -910,6 +929,7 @@ route('POST', '/api/workspaces/:id/notes', async ({ env, user, params, body }) =
   await requireMember(env, params.id, user.id);
   const title = body.title === undefined ? '' : cleanString(body.title, 'заголовок', { max: 120, allowEmpty: true });
   const text = body.body === undefined ? '' : cleanString(body.body, 'текст', { max: 20000, allowEmpty: true });
+  await capCount(env, 'notes', 'workspace_id', params.id, LIMITS.notes_per_workspace, 'заметок в пространстве');
   const id = newId();
   const ts = now();
   await env.DB.prepare('INSERT INTO notes (id, workspace_id, title, body, author_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -1000,6 +1020,7 @@ route('POST', '/api/workspaces/:id/files', async ({ env, user, params, body }) =
   if (!data || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) fail(400, 'пустой или повреждённый файл');
   const size = Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
   if (size > MAX_FILE_BYTES) fail(413, 'файл больше 1 мб');
+  await capCount(env, 'files', 'workspace_id', params.id, LIMITS.files_per_workspace, 'файлов в пространстве');
   const used = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS s FROM files WHERE workspace_id = ?').bind(params.id).first();
   if (used.s + size > MAX_WORKSPACE_FILES_BYTES) fail(413, 'место в пространстве закончилось (20 мб)');
   const id = newId();
@@ -1042,7 +1063,7 @@ route('DELETE', '/api/files/:id', async ({ env, user, params }) => {
 const AI_MODELS = ['@cf/google/gemma-3-12b-it', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'];
 // иероглифы иногда просачиваются в русский текст: вырезаем их
 const CJK = /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]/g;
-const AI_DAILY_LIMIT = 40;
+const AI_DAILY_LIMIT = LIMITS.ai_per_day;
 
 const AI_REFUSAL = 'Я помогаю только с задачами и проектами в tasqly. Спроси про итоги, сроки, нагрузку или план работы.';
 
