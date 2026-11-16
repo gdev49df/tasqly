@@ -455,6 +455,26 @@ assert.equal((await client()('POST', '/api/auth/login', { email: `eve${run}@test
   assert.equal(r.status, 404);
 }
 ok('голос: расшифровка записи, проверки и права');
+{
+  const sp = (await alice('POST', '/api/workspaces', { name: 'поиск' })).data.workspace;
+  const spr = (await alice('POST', `/api/workspaces/${sp.id}/projects`, { name: 'Сайт' })).data.project;
+  const st = (await alice('POST', `/api/projects/${spr.id}/tasks`, { title: 'Дизайн главной' })).data.task;
+  const scode = (await alice('GET', `/api/workspaces/${sp.id}`)).data.workspace.invite_code;
+  await bob('POST', '/api/workspaces/join', { code: scode });
+  r = await alice('GET', '/api/search?q=' + encodeURIComponent('дизайн'));
+  assert.ok(r.data.tasks.some((t) => t.id === st.id), 'регистр не важен');
+  r = await bob('GET', '/api/search?q=' + encodeURIComponent('ДИЗАЙН'));
+  assert.ok(r.data.tasks.some((t) => t.id === st.id), 'участник видит задачи пространства');
+  const out = client();
+  await out('POST', '/api/auth/register', { email: `s${run}@test.dev`, name: 'Чужой', password: 'password123' });
+  r = await out('GET', '/api/search?q=' + encodeURIComponent('Дизайн'));
+  assert.equal(r.data.tasks.length, 0, 'чужой ничего не находит');
+  r = await alice('GET', '/api/search?q=%25%25');
+  assert.equal(r.data.tasks.length, 0, '% не работает как маска');
+  r = await alice('GET', '/api/search?q=a');
+  assert.equal(r.data.tasks.length, 0);
+}
+ok('поиск: находит своё, не показывает чужое, спецсимволы экранированы');
 ok('смена пароля: проверка старого, новый работает, другие сессии завершены');
 
 // лимиты на количество объектов

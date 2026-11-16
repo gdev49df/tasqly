@@ -467,6 +467,38 @@ route('GET', '/api/inbox', async ({ env, user }) => {
   return json({ tasks: tasks.results, comments: comments.results });
 });
 
+// поиск по всем пространствам пользователя: проекты, задачи, заметки, файлы
+route('GET', '/api/search', async ({ env, user, req }) => {
+  const raw = (new URL(req.url).searchParams.get('q') || '').trim().slice(0, 60);
+  if (raw.length < 2) return json({ projects: [], tasks: [], notes: [], files: [] });
+  // LIKE в sqlite не различает регистр только для латиницы, поэтому ищем по четырём написаниям
+  const esc = (v) => '%' + v.replace(/[\\%_]/g, '\\$&') + '%';
+  const lower = raw.toLowerCase();
+  const variants = [...new Set([raw, lower, raw.toUpperCase(), lower.charAt(0).toUpperCase() + lower.slice(1)])].map(esc);
+  const binds = [user.id, ...variants];
+  const any = (col) => '(' + variants.map((_, i) => `${col} LIKE ?${i + 2} ESCAPE '\\'`).join(' OR ') + ')';
+  const mem = (ws) => `JOIN members m ON m.workspace_id = ${ws} AND m.user_id = ?1`;
+  const [projects, tasks, notes, files] = await Promise.all([
+    env.DB.prepare(
+      `SELECT p.id, p.name, w.id AS workspace_id, w.name AS workspace_name FROM projects p JOIN workspaces w ON w.id = p.workspace_id ${mem('p.workspace_id')}
+       WHERE ${any('p.name')} ORDER BY p.name LIMIT 5`,
+    ).bind(...binds).all(),
+    env.DB.prepare(
+      `SELECT t.id, t.title, t.project_id, p.name AS project_name, c.is_done FROM tasks t JOIN projects p ON p.id = t.project_id JOIN columns c ON c.id = t.column_id ${mem('p.workspace_id')}
+       WHERE ${any('t.title')} OR ${any('t.description')} ORDER BY c.is_done, t.updated_at DESC LIMIT 8`,
+    ).bind(...binds).all(),
+    env.DB.prepare(
+      `SELECT n.id, n.title, n.workspace_id, w.name AS workspace_name FROM notes n JOIN workspaces w ON w.id = n.workspace_id ${mem('n.workspace_id')}
+       WHERE ${any('n.title')} OR ${any('n.body')} ORDER BY n.updated_at DESC LIMIT 5`,
+    ).bind(...binds).all(),
+    env.DB.prepare(
+      `SELECT f.id, f.name, f.workspace_id, w.name AS workspace_name FROM files f JOIN workspaces w ON w.id = f.workspace_id ${mem('f.workspace_id')}
+       WHERE ${any('f.name')} ORDER BY f.created_at DESC LIMIT 5`,
+    ).bind(...binds).all(),
+  ]);
+  return json({ projects: projects.results, tasks: tasks.results, notes: notes.results, files: files.results });
+});
+
 // пространства
 
 route('GET', '/api/workspaces', async ({ env, user }) => {

@@ -1800,3 +1800,19 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .mic-btn.rec .mic-dot { background: #d92d20; animation: mic-pulse 1s ease-in-out infinite; }
 @keyframes mic-pulse { 50% { transform: scale(1.5); opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .mic-btn.rec .mic-dot { animation: none; } }
+
+/* v9.2 поиск */
+.search-pop { align-items: flex-start; padding-top: 12vh; }
+.search-modal { width: min(620px, 100%); padding: 0; overflow: hidden; }
+.search-field { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); color: var(--muted); }
+.search-field input { flex: 1; border: 0; outline: 0; background: none; font-size: 16px; color: var(--text, inherit); padding: 0; box-shadow: none; }
+.search-field input::-webkit-search-cancel-button { display: none; }
+.search-field kbd { font: 11px var(--font-mono, monospace); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; }
+.search-list { max-height: 55vh; overflow-y: auto; padding: 6px; }
+.search-title { font-size: 12px; color: var(--muted); padding: 10px 10px 4px; }
+.search-row { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; padding: 9px 10px; border-radius: 8px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.search-row.on { background: var(--bg-subtle); }
+.search-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-sub { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.search-hint { padding: 22px 12px; text-align: center; color: var(--muted); font-size: 14px; }
+@media (max-width: 640px) { .search-pop { padding-top: 0; } .search-modal { border-radius: 16px 16px 0 0; } }

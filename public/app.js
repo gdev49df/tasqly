@@ -328,6 +328,7 @@
     clock: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><path d="M10 6v4.2l2.8 1.7"/></svg>',
     menu: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>',
     spark: '<svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M10 1.8 11.9 7l5.3 1.9-5.3 1.9L10 16.2 8.1 10.8 2.8 8.9 8.1 7zM16 13.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>',
+    search: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.8 3.8"/></svg>',
     mail: '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="4.5" width="15" height="11" rx="2.5"/><path d="m3.5 6 6.5 5 6.5-5" stroke-linecap="round"/></svg>',
     home: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 9 10 3.5 16.5 9v7a1 1 0 0 1-1 1h-3.5v-5h-4v5H4.5a1 1 0 0 1-1-1z"/></svg>',
     folder: '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2.5 6a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.8H16A1.5 1.5 0 0 1 17.5 7.8v6.7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
@@ -899,6 +900,80 @@
     loadProjects().catch((e) => toast(e.message));
   }
 
+  // поиск по всему пространству: Ctrl+K
+  function openSearch() {
+    if (document.querySelector('.search-pop')) return;
+    const input = h('input', { type: 'search', placeholder: 'Искать задачи, заметки, файлы, проекты', 'aria-label': 'Поиск', autocomplete: 'off', maxlength: 60 });
+    const list = h('div', { class: 'search-list', role: 'listbox' }, h('div', { class: 'search-hint' }, 'Введи хотя бы 2 буквы'));
+    const overlay = h('div', { class: 'overlay search-pop' });
+    const close = () => closeOverlay(overlay);
+    overlay.addEventListener('tq-close', close);
+    overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
+    let items = [];
+    let cur = -1;
+    let seq = 0;
+    let timer = 0;
+    const mark = () => items.forEach((it, i) => { it.el.classList.toggle('on', i === cur); if (i === cur) it.el.scrollIntoView({ block: 'nearest' }); });
+    const go = (it) => {
+      close();
+      try { if (it.task) sessionStorage.setItem('tq_open_task', it.task); } catch { /* нет хранилища */ }
+      if (location.hash === it.href) route();
+      else location.hash = it.href;
+    };
+    const paintResults = (r) => {
+      items = [];
+      const groups = [];
+      const add = (title, rows, mk) => {
+        if (!rows.length) return;
+        groups.push(h('div', { class: 'search-title' }, title));
+        rows.forEach((row) => {
+          const it = mk(row);
+          it.el = h('button', { class: 'search-row', type: 'button', role: 'option', onclick: () => go(it), onmousemove: () => { cur = items.indexOf(it); mark(); } }, h('span', { class: 'search-main' }, it.label), h('span', { class: 'search-sub' }, it.sub));
+          items.push(it);
+          groups.push(it.el);
+        });
+      };
+      add('Проекты', r.projects, (p) => ({ label: p.name, sub: p.workspace_name, href: `#/p/${p.id}` }));
+      add('Задачи', r.tasks, (t) => ({ label: t.title, sub: t.project_name + (t.is_done ? ' · готово' : ''), href: `#/p/${t.project_id}`, task: t.id }));
+      add('Заметки', r.notes, (n) => ({ label: n.title || 'Без названия', sub: n.workspace_name, href: `#/w/${n.workspace_id}/notes` }));
+      add('Диск', r.files, (f) => ({ label: f.name, sub: f.workspace_name, href: `#/w/${f.workspace_id}/files` }));
+      cur = items.length ? 0 : -1;
+      list.replaceChildren(...(groups.length ? groups : [h('div', { class: 'search-hint' }, 'Ничего не найдено')]));
+      mark();
+    };
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 2) { items = []; cur = -1; list.replaceChildren(h('div', { class: 'search-hint' }, 'Введи хотя бы 2 буквы')); return; }
+      timer = setTimeout(async () => {
+        const mine = ++seq;
+        try {
+          const r = await api.get(`/api/search?q=${encodeURIComponent(q)}`);
+          if (mine === seq) paintResults(r);
+        } catch (e) {
+          if (mine === seq) list.replaceChildren(h('div', { class: 'search-hint' }, e.message));
+        }
+      }, 180);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!items.length) return;
+        cur = (cur + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        mark();
+      } else if (e.key === 'Enter' && items[cur]) go(items[cur]);
+    });
+    overlay.append(h('div', { class: 'modal search-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Поиск' }, h('div', { class: 'search-field' }, icon('search'), input, h('kbd', null, 'Esc')), list));
+    document.body.append(overlay);
+    input.focus();
+  }
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && state.user && IN_PANEL) {
+      e.preventDefault();
+      openSearch();
+    }
+  });
+
   function topbar(crumbs) {
     const mail = state.user ? h('button', { class: 'icon-btn mail-btn', title: 'Входящие', 'aria-label': 'Входящие', onclick: (e) => openInbox(e.currentTarget) }, icon('mail')) : null;
     if (mail) loadBadge(mail);
@@ -922,6 +997,7 @@
       h('nav', { class: 'crumbs' }, crumbs.map((c) => [h('span', null, '/'), c.href ? h('a', { href: c.href }, c.label) : h('span', { class: 'current' }, c.label)])),
       h('div', { class: 'timer-slot' }),
       quickBtn,
+      state.user ? h('button', { class: 'icon-btn search-btn', title: 'Поиск (Ctrl+K)', 'aria-label': 'Поиск', onclick: openSearch }, icon('search')) : null,
       trackBtn,
       aiBtn,
       themeToggle(),
@@ -3310,6 +3386,11 @@
       content,
     );
     paint();
+    {
+      let want = null;
+      try { want = sessionStorage.getItem('tq_open_task'); sessionStorage.removeItem('tq_open_task'); } catch { /* нет хранилища */ }
+      if (want && S.tasks.some((t) => t.id === want)) openTask(want);
+    }
 
     // --- горячие клавиши и автообновление ---
     const onKey = (e) => {
