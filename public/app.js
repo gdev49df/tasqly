@@ -46,9 +46,13 @@
   // плавная смена темы: круг расходится от кнопки (View Transitions), без поддержки — мягкое затухание цветов
   function setTheme(next, from) {
     const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const commit = () => { themeStore.set(next); applyTheme(next); };
+    // выбор запоминаем сразу, а в страницу применяем всегда последний выбор: быстрые клики не расходятся
+    themeStore.set(next);
+    window.dispatchEvent(new Event('tq-theme'));
+    const commit = () => applyTheme(themeStore.get());
     if (calm) return commit();
     const root = document.documentElement;
+    if (themeAnim) { try { themeAnim.skipTransition(); } catch { /* уже закончилась */ } themeAnim = null; }
     if (document.startViewTransition && from && from.getBoundingClientRect) {
       const r = from.getBoundingClientRect();
       const x = r.left + r.width / 2;
@@ -56,17 +60,23 @@
       const rad = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
       root.classList.add('theme-vt');
       const vt = document.startViewTransition(commit);
+      themeAnim = vt;
       vt.ready.then(() => root.animate(
         { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${rad}px at ${x}px ${y}px)`] },
         { duration: 620, easing: 'cubic-bezier(.22,.8,.24,1)', pseudoElement: '::view-transition-new(root)' },
       )).catch(() => {});
-      vt.finished.finally(() => root.classList.remove('theme-vt'));
+      vt.finished.finally(() => {
+        if (themeAnim === vt) themeAnim = null;
+        root.classList.remove('theme-vt');
+        commit();
+      });
       return;
     }
     root.classList.add('theme-fade');
     commit();
     setTimeout(() => root.classList.remove('theme-fade'), 520);
   }
+  let themeAnim = null;
   function themeToggle(extra = '') {
     const btn = h('button', { class: `icon-btn theme-toggle ${extra}`.trim(), title: 'Светлая / тёмная тема', 'aria-label': 'Сменить тему' });
     btn.innerHTML = '<svg class="i-sun" viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.6"/><path d="M10 2.5v1.8M10 15.7v1.8M2.5 10h1.8M15.7 10h1.8M4.7 4.7l1.3 1.3M14 14l1.3 1.3M15.3 4.7 14 6M6 14l-1.3 1.3"/></svg><svg class="i-moon" viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 11.6A6.8 6.8 0 0 1 8.4 3.5a6.8 6.8 0 1 0 8.1 8.1z"/></svg>';
@@ -1395,8 +1405,10 @@
     const themes = [['light', 'Светлая'], ['dark', 'Тёмная'], ['auto', 'Как в системе']];
     const themeSeg = h('div', { class: 'seg prof-theme' });
     const paintTheme = () => themeSeg.replaceChildren(...themes.map(([k, label]) =>
-      h('button', { class: k === themeStore.get() ? 'active' : '', onclick: (e) => { setTheme(k, e.currentTarget); paintTheme(); } }, label)));
+      h('button', { class: k === themeStore.get() ? 'active' : '', onclick: (e) => setTheme(k, e.currentTarget) }, label)));
     paintTheme();
+    const syncTheme = () => (themeSeg.isConnected ? paintTheme() : window.removeEventListener('tq-theme', syncTheme));
+    window.addEventListener('tq-theme', syncTheme);
 
     const pct = Math.min(100, Math.round((usage.ai_used / usage.ai_limit) * 100));
     const row = (title, text, action) => h('div', { class: 'prof-row' }, h('div', null, h('b', null, title), text ? h('span', null, text) : null), action);
