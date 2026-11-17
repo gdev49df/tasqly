@@ -1914,3 +1914,7 @@ body.ai-full .ai-dock .chat > div:last-child { padding-left: 20px; padding-right
 .imp-info.bad { background: rgba(229, 72, 77, 0.12); color: #e5484d; }
 .imp-info[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+/* переключатель: включённый — лаймовый в любой теме, не переносится на новую строку */
+.switch.on { background: #c6f432; }
+.switch.on::after { background: #111; box-shadow: none; }
+.prof-row > div:first-child { flex: 1 1 200px; min-width: 0; }
