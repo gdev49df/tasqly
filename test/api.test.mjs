@@ -821,6 +821,58 @@ ok('шаблоны проектов: колонки и стартовые зад
 }
 ok('импорт: колонки, задачи, метки, чек-листы, большие файлы, чужим нельзя');
 
+// ---------- приглашения друзей и статистика роста ----------
+{
+  const host = client();
+  const regH = await host('POST', '/api/auth/register', { email: `host${run}@test.dev`, name: 'Хозяин', password: 'password123' });
+  const r1 = await host('GET', '/api/me/referral');
+  assert.equal(r1.status, 200);
+  assert.match(r1.data.code, /^[a-z0-9]{6,12}$/);
+  assert.ok(r1.data.link.endsWith(`/register?ref=${r1.data.code}`));
+  assert.equal((await host('GET', '/api/me/referral')).data.code, r1.data.code, 'код не меняется');
+  assert.equal(r1.data.invited, 0);
+
+  const friend = client();
+  const regF = await friend('POST', '/api/auth/register', { email: `friend${run}@test.dev`, name: 'Друг', password: 'password123', source: { ref: r1.data.code, utm_source: 'telegram', junk: 'x'.repeat(500) } });
+  assert.equal(regF.status, 201);
+  assert.equal(regF.data.referred, true);
+  assert.equal((await host('GET', '/api/me/referral')).data.invited, 1);
+  // до подтверждения почты бонуса нет
+  assert.equal((await friend('GET', '/api/me')).data.user.trial_ends_at, null);
+  const v = await client()('POST', '/api/auth/verify', { token: regF.data.debug_verify_token });
+  assert.equal(v.data.bonus_days, 7);
+  const DAY = 86400000;
+  const fTrial = (await friend('GET', '/api/me')).data.user.trial_ends_at;
+  assert.ok(fTrial > Date.now() + 11.9 * DAY && fTrial < Date.now() + 12.1 * DAY, 'другу 5 пробных + 7 бонусных');
+  const hTrial = (await host('GET', '/api/me')).data.user;
+  assert.ok(hTrial.trial_ends_at > Date.now() + 11.9 * DAY, 'пригласившему тоже');
+  assert.equal(hTrial.effective_plan, 'team');
+  // повторное открытие ссылки бонус не удваивает
+  assert.equal((await client()('POST', '/api/auth/verify', { token: regF.data.debug_verify_token })).data.bonus_days, 0);
+  assert.equal((await friend('GET', '/api/me')).data.user.trial_ends_at, fTrial);
+  const r2 = (await host('GET', '/api/me/referral')).data;
+  assert.equal(r2.rewarded, 1);
+  assert.equal(r2.earned_days, 7);
+  // чужой или кривой код просто игнорируется
+  const stray = await client()('POST', '/api/auth/register', { email: `stray${run}@test.dev`, name: 'Без друга', password: 'password123', ref: 'ZZZ; drop' });
+  assert.equal(stray.status, 201);
+  assert.equal(stray.data.referred, false);
+  void regH;
+
+  // статистика только для владельца сервиса
+  assert.equal((await host('GET', '/api/admin/growth')).status, 404);
+  assert.equal((await host('GET', '/api/me')).data.user.staff, undefined);
+  const staff = client();
+  await staff('POST', '/api/auth/register', { email: 'staff@tasqly.test', name: 'Владелец', password: 'password123' }).then((r) => r.status === 409 && staff('POST', '/api/auth/login', { email: 'staff@tasqly.test', password: 'password123' }));
+  assert.equal((await staff('GET', '/api/me')).data.user.staff, true);
+  const g = await staff('GET', '/api/admin/growth');
+  assert.equal(g.status, 200);
+  assert.ok(g.data.totals.users >= 3);
+  assert.ok(g.data.sources.some((s) => s.source === 'telegram'));
+  assert.ok(g.data.referrers.some((r) => r.name === 'Хозяин'));
+}
+ok('приглашения: ссылка, бонус обоим после подтверждения, без повторов; статистика только владельцу');
+
 await alice('POST', '/api/auth/logout', {});
 assert.equal((await alice('GET', '/api/me')).status, 401);
 ok('выход');

@@ -16,6 +16,14 @@ PAGES = {
   'changelog': dict(title='Что нового · tasqly', desc='Что появилось в tasqly: роли, журнал действий, подтверждение почты, экспорт данных, поиск и многое другое.', index=True, prio='0.4',
            h1='Что нового', text='Что появилось в tasqly: подтверждение почты, журнал действий, экспорт данных и удаление аккаунта, роли участников, поиск, повторяющиеся задачи, голосовая задача.'),
   'status': dict(title='Статус сервиса · tasqly', desc='Живая проверка работы tasqly: сервис, база данных, резервные копии, AI.', index=False, h1='Статус сервиса', text='Живая проверка работы tasqly: сервис, база данных, резервные копии и AI-помощник.'),
+  'task-tracker': dict(title='Таск-трекер для команды · tasqly', desc='Таск-трекер для небольшой команды: доска, список и календарь задач, сроки, исполнители, учёт времени, чат и файлы. Бесплатно до 3 человек.', index=True, prio='0.7',
+           h1='Таск-трекер для небольшой команды', text='Задачи, сроки, учёт времени, заметки, чат и файлы в одном пространстве. Доска, список и календарь, исполнители, приоритеты, метки, чек-листы, роли участников, ссылка для клиента и AI-помощник. Работает в браузере на компьютере и телефоне. «Старт» бесплатный до 3 человек.'),
+  'uchet-vremeni': dict(title='Учёт рабочего времени по задачам · tasqly', desc='Таймер в задаче, ручной ввод и отчёт по людям и проектам за 7, 30 или 90 дней. Учёт времени команды в tasqly.', index=True, prio='0.6',
+           h1='Учёт рабочего времени по задачам', text='Включай таймер прямо в задаче или добавляй время вручную. Отчёт показывает, сколько ушло по людям и по проектам за 7, 30 или 90 дней. Таймер работает на всех тарифах.'),
+  'perehod-s-trello': dict(title='Переезд с Trello: импорт досок · tasqly', desc='Как перенести доски из Trello в tasqly: экспорт в JSON и импорт за пару минут. Списки, карточки, метки, чек-листы и сроки переносятся автоматически.', index=True, prio='0.6',
+           h1='Переезд с Trello в tasqly за пару минут', text='Скачай доску из Trello через «Печать и экспорт», «Экспорт в JSON» и загрузи файл в tasqly. Списки станут колонками, карточки задачами, метки, чек-листы и сроки сохранятся. Импорт бесплатный.'),
+  'perehod-s-clickup': dict(title='Переезд с ClickUp: импорт задач из CSV · tasqly', desc='Как перенести задачи из ClickUp в tasqly: экспорт списка в CSV и импорт. Статусы, сроки, приоритеты, теги и подзадачи переносятся автоматически.', index=True, prio='0.6',
+           h1='Переезд с ClickUp в tasqly', text='Выгрузи список задач из ClickUp в CSV и загрузи в tasqly. Статусы станут колонками, теги метками, подзадачи пунктами чек-листа, сроки и приоритеты сохранятся. Импорт бесплатный.'),
   'register': dict(title='Регистрация · tasqly', desc='Создай пространство в tasqly за минуту. Карта не нужна.', index=True, prio='0.6',
            h1='Регистрация', text='Создай пространство в tasqly за минуту. Карта не нужна.'),
   'login': dict(title='Вход · tasqly', desc='Вход в tasqly.', index=False, h1='Вход', text='Войти в tasqly.'),
@@ -45,12 +53,15 @@ for slug, p in PAGES.items():
   <meta property="og:title" content="{esc(p['title'])}">
   <meta property="og:description" content="{esc(p['desc'])}">
   <meta property="og:url" content="{url}">
-  <meta property="og:image" content="{SITE}/icon-512.png">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="{SITE}/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="{SITE}/og.jpg">
 {verify}  {END}
   '''
     html = html.replace('<meta name="theme-color"', block + '<meta name="theme-color"', 1)
-    nav = '<a href="/">Главная</a> <a href="/pricing">Тарифы</a> <a href="/contacts">Контакты</a> <a href="/register">Регистрация</a>'
+    nav = '<a href="/">Главная</a> <a href="/pricing">Тарифы</a> <a href="/task-tracker">Таск-трекер для команды</a> <a href="/uchet-vremeni">Учёт времени</a> <a href="/perehod-s-trello">Переезд с Trello</a> <a href="/perehod-s-clickup">Переезд с ClickUp</a> <a href="/contacts">Контакты</a> <a href="/register">Регистрация</a>'
     static = f'<main data-seo><h1>{esc(p["h1"])}</h1><p>{esc(p["text"])}</p><nav>{nav}</nav></main>'
     html = re.sub(r'<div id="app">.*?</div>', f'<div id="app">{static}</div>', html, count=1, flags=re.S)
     f.write_text(html, encoding='utf-8')

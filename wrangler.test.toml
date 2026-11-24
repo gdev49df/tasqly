@@ -13,6 +13,7 @@ not_found_handling = "404-page"
 [vars]
 AI_MOCK = "1"
 MAIL_MOCK = "1"
+ADMIN_EMAILS = "staff@tasqly.test"
 ALLOWED_ORIGINS = "https://gdev49df.github.io"
 
 [[d1_databases]]

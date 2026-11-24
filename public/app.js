@@ -125,6 +125,22 @@
   const PANEL = '/panel/';
   const API_BASE = String(window.TASQLY_API || '').replace(/\/$/, '');
 
+  // откуда пришёл человек: utm-метки и приглашение друга запоминаем до регистрации
+  (() => {
+    try {
+      const q = new URLSearchParams(location.search);
+      const got = {};
+      for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'ref']) { const v = q.get(k); if (v) got[k] = v.slice(0, 120); }
+      let host = '';
+      try { host = document.referrer ? new URL(document.referrer).hostname : ''; } catch { /* нет источника */ }
+      if (host === location.hostname) host = '';
+      const cur = JSON.parse(localStorage.getItem('tq_src') || 'null');
+      if (Object.keys(got).length) localStorage.setItem('tq_src', JSON.stringify({ ...(cur && cur.ref && !got.ref ? { ref: cur.ref } : {}), ...got, landing: location.pathname, referrer: host }));
+      else if (!cur) localStorage.setItem('tq_src', JSON.stringify({ landing: location.pathname, referrer: host }));
+    } catch { /* нет хранилища */ }
+  })();
+  const signupSource = () => { try { return JSON.parse(localStorage.getItem('tq_src') || '{}') || {}; } catch { return {}; } };
+
   async function api(method, path, body) {
     if (method !== 'GET') cacheClear();
     const headers = {};
@@ -1342,6 +1358,7 @@
         { class: 'lf-in' },
         h('div', { class: 'lf-brand' }, logoEl({ class: 'logo' }), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве. С AI-помощником, который знает ваши проекты.')),
         col('Продукт', [lf('Возможности', 'features'), lf('Проекты', 'kinds'), lf('Как начать', 'steps'), lf('Тарифы', 'pricing')]),
+        col('Решения', [h('a', { href: '/task-tracker' }, 'Таск-трекер для команды'), h('a', { href: '/uchet-vremeni' }, 'Учёт времени'), h('a', { href: '/perehod-s-trello' }, 'Переезд с Trello'), h('a', { href: '/perehod-s-clickup' }, 'Переезд с ClickUp')]),
         col('Аккаунт', state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: '/login' }, 'Войти'), h('a', { href: '/register' }, 'Создать пространство')]),
         col('Документы', [h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты'), h('a', { href: '/changelog' }, 'Что нового'), h('a', { href: '/status' }, 'Статус'), h('a', { href: '/privacy' }, 'Конфиденциальность'), h('a', { href: '/terms' }, 'Условия')]),
       ),
@@ -1452,6 +1469,10 @@
 
   // «что нового»: только то, что уже работает; даты не выдумываем, всё сделано в ноябре 2026
   const CHANGELOG = [
+    { title: 'Пригласи друга', date: 'Ноябрь 2026', items: [
+      ['Приглашения.', 'В профиле есть личная ссылка. Друг регистрируется по ней и подтверждает почту, и вы оба получаете 7 дней тарифа «Команда».'],
+      ['Переезд с Trello и ClickUp.', 'Отдельные страницы с пошаговой инструкцией: что переносится, а что нет.'],
+    ] },
     { title: 'Письма, шаблоны и импорт', date: 'Ноябрь 2026', items: [
       ['Письма-уведомления.', 'Когда тебе назначили задачу, упомянули в комментарии или срок наступает завтра. Каждое письмо включается и выключается в профиле.'],
       ['Шаблоны проектов.', 'Запуск сайта, контент-план, спринт и найм: колонки и стартовые задачи уже на месте.'],
@@ -1489,10 +1510,103 @@
   ];
 
   // ---------- отдельные публичные страницы: /pricing, /contacts, /privacy, /terms ----------
+  // ---------- страницы под поисковые запросы ----------
+  const SEO_PAGES = {
+    'perehod-s-trello': {
+      tab: 'Переезд с Trello: импорт досок · tasqly',
+      title: 'Переезд с Trello',
+      h1: 'Переезд с Trello в tasqly за пару минут',
+      lead: 'Загрузи файл экспорта доски, и списки, карточки, метки, чек-листы и сроки появятся в tasqly. Ничего не нужно переносить руками.',
+      steps: [
+        ['Скачай доску из Trello', 'Открой доску, меню справа, «Печать и экспорт», «Экспорт в JSON». Браузер сохранит файл.'],
+        ['Создай пространство в tasqly', 'Регистрация занимает минуту, карта не нужна.'],
+        ['Загрузи файл', 'В списке проектов нажми «Импорт из Trello или ClickUp» и выбери файл. tasqly покажет, сколько колонок и задач нашлось.'],
+      ],
+      moves: ['Списки становятся колонками доски', 'Карточки становятся задачами с описанием', 'Метки сохраняют названия и цвета', 'Чек-листы переносятся с отметками о выполнении', 'Сроки карточек становятся сроками задач', 'Списки с названием вроде «Готово» отмечаются как завершённые'],
+      skips: ['Архивные списки и карточки', 'Вложения и комментарии', 'Участников нужно пригласить в tasqly заново по коду пространства'],
+      faq: [
+        ['Сколько карточек можно перенести?', 'До 500 задач в одном проекте. Большую доску можно перенести несколькими файлами.'],
+        ['Нужно ли удалять доску в Trello?', 'Нет, импорт только читает файл. Доска в Trello остаётся как была.'],
+        ['Это бесплатно?', 'Да, импорт работает на любом тарифе, включая бесплатный «Старт».'],
+      ],
+    },
+    'perehod-s-clickup': {
+      tab: 'Переезд с ClickUp: импорт задач из CSV · tasqly',
+      title: 'Переезд с ClickUp',
+      h1: 'Переезд с ClickUp в tasqly',
+      lead: 'Выгрузи список задач из ClickUp в CSV и загрузи его в tasqly: статусы станут колонками, теги метками, подзадачи пунктами чек-листа.',
+      steps: [
+        ['Выгрузи задачи из ClickUp', 'Открой нужный список, нажми «Экспорт» и выбери формат CSV.'],
+        ['Создай пространство в tasqly', 'Регистрация занимает минуту, карта не нужна.'],
+        ['Загрузи файл', 'В списке проектов нажми «Импорт из Trello или ClickUp» и выбери CSV. Перед импортом видно, что нашлось в файле.'],
+      ],
+      moves: ['Статусы становятся колонками доски', 'Название, описание и срок каждой задачи', 'Приоритет: срочный и высокий, обычный, низкий', 'Теги становятся метками', 'Подзадачи становятся пунктами чек-листа', 'Статусы вроде «Complete» отмечаются как завершённые'],
+      skips: ['Вложения и комментарии', 'Записи учёта времени', 'Исполнителей нужно назначить заново после того, как команда присоединится'],
+      faq: [
+        ['Подойдёт CSV не из ClickUp?', 'Да, если в первой строке есть колонка с названием задачи (Task Name, Name, Название). Статус, срок, приоритет и теги подхватятся, если они есть.'],
+        ['Сколько задач можно перенести?', 'До 500 задач в одном проекте.'],
+        ['Это бесплатно?', 'Да, импорт работает на любом тарифе.'],
+      ],
+    },
+    'task-tracker': {
+      tab: 'Таск-трекер для команды · tasqly',
+      title: 'Таск-трекер для команды',
+      h1: 'Таск-трекер для небольшой команды',
+      lead: 'Задачи, сроки, учёт времени, заметки, чат и файлы в одном пространстве. Работает в браузере на компьютере и телефоне, без установки.',
+      features: [
+        ['Доска, список и календарь', 'Одни и те же задачи в трёх видах: двигай карточки по колонкам, смотри список на день или сроки в календаре.'],
+        ['Исполнители, сроки, приоритеты', 'Метки, чек-листы, повторяющиеся задачи и фильтр просроченного.'],
+        ['Комментарии с упоминаниями', 'Напиши @имя, и человек получит письмо. Письма о назначении и сроках включаются в профиле.'],
+        ['Роли участников', 'Владелец, администратор, участник и наблюдатель, который только смотрит.'],
+        ['Ссылка для клиента', 'Покажи доску проекта по ссылке только для просмотра, без регистрации.'],
+        ['AI-помощник', 'Разобьёт большую задачу на шаги и подскажет, что горит. Доступен на тарифе «Команда».'],
+      ],
+      faq: [
+        ['Сколько стоит?', '«Старт» бесплатный, до 3 человек в пространстве. «Команда» ориентировочно 2 500 ₸ за человека в месяц, новый аккаунт может попробовать её 5 дней. Оплата пока не подключена.'],
+        ['Нужно ли что-то устанавливать?', 'Нет, tasqly работает в браузере. На телефоне его можно добавить на главный экран как приложение.'],
+        ['Можно перенести задачи из другого сервиса?', 'Да, есть импорт из Trello (JSON) и ClickUp (CSV).'],
+        ['Есть готовые заготовки?', 'Да: запуск сайта, контент-план, спринт и найм сотрудника, с колонками и стартовыми задачами.'],
+      ],
+    },
+    'uchet-vremeni': {
+      tab: 'Учёт рабочего времени по задачам · tasqly',
+      title: 'Учёт времени по задачам',
+      h1: 'Учёт рабочего времени по задачам',
+      lead: 'Включай таймер прямо в задаче или добавляй время вручную. Отчёт покажет, сколько ушло по людям и по проектам.',
+      features: [
+        ['Таймер в задаче', 'Один клик в окне задачи, таймер виден в шапке, пока ты работаешь в других проектах.'],
+        ['Ручной ввод', 'Забыл включить таймер? Добавь время вручную с комментарием.'],
+        ['Отчёт за 7, 30 или 90 дней', 'Сколько времени ушло по людям и по проектам, плюс последние записи. Отчёт открыт на тарифе «Команда».'],
+        ['Оценка задачи', 'Укажи, сколько задача должна занять, и сравни с тем, сколько ушло на самом деле.'],
+      ],
+      faq: [
+        ['Таймер есть на бесплатном тарифе?', 'Да, таймер работает на всех тарифах. Обзор и отчёты по времени открыты на «Команде».'],
+        ['Можно выгрузить данные?', 'Да, в профиле можно скачать все свои данные одним файлом, включая записи времени.'],
+      ],
+    },
+  };
+
+  function seoPageBody(kind) {
+    const p = SEO_PAGES[kind];
+    const cta = h('div', { class: 'pg-cta' }, h('h2', null, 'Попробуй на своих задачах'), h('p', null, 'Регистрация меньше минуты, карта не нужна.'), h('a', { class: 'btn', href: `/register?utm_source=seo&utm_campaign=${kind}` }, 'Создать пространство'));
+    const list = (title, items, cls) => h('div', { class: `pg-card seo-list ${cls}` }, h('b', null, title), h('ul', null, items.map((x) => h('li', null, x))));
+    return [
+      h('div', { class: 'pg-hero' }, h('h1', null, p.h1), h('p', { class: 'pg-lead' }, p.lead),
+        h('a', { class: 'btn', style: 'margin-top:22px', href: `/register?utm_source=seo&utm_campaign=${kind}` }, 'Начать бесплатно')),
+      p.steps ? h('h2', { class: 'pg-h2' }, 'Как перенести') : null,
+      p.steps ? h('ol', { class: 'seo-steps' }, p.steps.map(([t, d]) => h('li', null, h('b', null, t), h('p', null, d)))) : null,
+      p.moves ? h('div', { class: 'seo-two' }, list('Что перенесётся', p.moves, 'yes'), list('Что не перенесётся', p.skips, 'no')) : null,
+      p.features ? h('div', { class: 'seo-grid' }, p.features.map(([t, d]) => h('div', { class: 'pg-card' }, h('b', null, t), h('p', null, d)))) : null,
+      h('h2', { class: 'pg-h2' }, 'Частые вопросы'),
+      h('div', { class: 'faq' }, p.faq.map(([q, an]) => h('details', { class: 'faq-i' }, h('summary', null, q), h('p', null, an)))),
+      cta,
+    ];
+  }
+
   function viewPublicPage(kind) {
     destroyDock();
-    const titles = { pricing: 'Тарифы', contacts: 'Контакты', privacy: 'Политика конфиденциальности', terms: 'Условия использования', changelog: 'Что нового', status: 'Статус сервиса' };
-    document.title = `${titles[kind]} · tasqly`;
+    const titles = { pricing: 'Тарифы', contacts: 'Контакты', privacy: 'Политика конфиденциальности', terms: 'Условия использования', changelog: 'Что нового', status: 'Статус сервиса', ...Object.fromEntries(Object.entries(SEO_PAGES).map(([k, v]) => [k, v.title])) };
+    document.title = SEO_PAGES[kind] ? SEO_PAGES[kind].tab : `${titles[kind]} · tasqly`;
     const cta = state.user ? h('a', { class: 'btn small nav-cta', href: PANEL }, 'Кабинет') : h('a', { class: 'btn small nav-cta', href: '/register' }, 'Начать сейчас');
     const nav = h('header', { class: 'land-nav' }, logoEl(), h('span', { class: 'grow' }),
       h('nav', { class: 'land-links' }, h('a', { class: 'nav-link', href: '/pricing' }, 'Тарифы'), h('a', { class: 'nav-link', href: '/contacts' }, 'Контакты')),
@@ -1501,13 +1615,16 @@
       h('div', { class: 'lf-in' },
         h('div', { class: 'lf-brand' }, logoEl(), h('p', null, 'Задачи, время, заметки, чат и файлы команды в одном пространстве.')),
         h('div', { class: 'lf-col' }, h('b', null, 'Продукт'), h('a', { href: '/' }, 'Главная'), h('a', { href: '/pricing' }, 'Тарифы'), h('a', { href: '/contacts' }, 'Контакты'), h('a', { href: '/changelog' }, 'Что нового'), h('a', { href: '/status' }, 'Статус')),
+        h('div', { class: 'lf-col' }, h('b', null, 'Решения'), h('a', { href: '/task-tracker' }, 'Таск-трекер для команды'), h('a', { href: '/uchet-vremeni' }, 'Учёт времени'), h('a', { href: '/perehod-s-trello' }, 'Переезд с Trello'), h('a', { href: '/perehod-s-clickup' }, 'Переезд с ClickUp')),
         h('div', { class: 'lf-col' }, h('b', null, 'Аккаунт'), ...(state.user ? [h('a', { href: PANEL }, 'Кабинет')] : [h('a', { href: '/login' }, 'Войти'), h('a', { href: '/register' }, 'Создать пространство')])),
         h('div', { class: 'lf-col' }, h('b', null, 'Документы'), h('a', { href: '/privacy' }, 'Конфиденциальность'), h('a', { href: '/terms' }, 'Условия')),
       ),
       h('div', { class: 'lf-bottom' }, h('span', null, `© ${new Date().getFullYear()} tasqly`), h('span', null, 'Сделано в Казахстане')));
 
     let body;
-    if (kind === 'pricing') {
+    if (SEO_PAGES[kind]) {
+      body = seoPageBody(kind);
+    } else if (kind === 'pricing') {
       const groups = [
         ['Работа', [['Проекты и задачи', true, true, true], ['Заметки', true, true, true], ['Таймер времени', true, true, true], ['Участников', 'до 3', 'до 30', 'без ограничений']]],
         ['Команда', [['Чат и диск', false, true, true], ['Обзор и отчёты по времени', false, true, true], ['AI-помощник', false, true, true]]],
@@ -1666,7 +1783,7 @@
     const googleBox = h('div', { class: 'g-box' });
     api.get('/api/config').then((c) => {
       if (!c.google) return;
-      googleBox.append(h('div', { class: 'or-line' }, h('span', null, 'или')), h('a', { class: 'btn ghost g-btn', href: `${API_BASE}/api/auth/google/start` }, h('span', { class: 'g-mark', 'aria-hidden': 'true' }, 'G'), 'Продолжить с Google'));
+      googleBox.append(h('div', { class: 'or-line' }, h('span', null, 'или')), h('a', { class: 'btn ghost g-btn', href: `${API_BASE}/api/auth/google/start?src=${encodeURIComponent(JSON.stringify(signupSource()))}` }, h('span', { class: 'g-mark', 'aria-hidden': 'true' }, 'G'), 'Продолжить с Google'));
     }).catch(() => {});
     const gErr = external ? new URLSearchParams(location.search).get('google') : null;
     if (gErr) queueMicrotask(() => { error.textContent = { cancel: 'Вход через Google отменён', email: 'Google не подтвердил твою почту', error: 'Не получилось войти через Google, попробуй ещё раз' }[gErr] || ''; });
@@ -1693,6 +1810,7 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const data = Object.fromEntries(new FormData(form));
+      if (mode === 'register') { const src = signupSource(); data.source = src; if (src.ref) data.ref = src.ref; }
       const btn = form.querySelector('button[type=submit]');
       btn.disabled = true;
       try {
@@ -1717,6 +1835,7 @@
         { class: 'auth' },
         logoEl(),
         h('div', { class: 'tag' }, opts.invited ? 'Тебя пригласили в пространство. Создай аккаунт или войди, и ты сразу попадёшь в него' : mode === 'register' ? 'Создай аккаунт и первое пространство' : 'Войди в свой кабинет'),
+        !opts.invited && signupSource().ref ? h('div', { class: 'ref-note' }, 'Тебя пригласил друг. После подтверждения почты вы оба получите 7 дней тарифа «Команда»') : null,
         h('div', { class: 'card' }, tabs, form, googleBox),
         h('a', { class: 'auth-back', href: '/' }, '← О сервисе'),
       ),
@@ -1757,7 +1876,7 @@
               t.assignee ? avatar(t.assignee) : null)))));
     };
     render(
-      h('header', { class: 'topbar' }, logoEl(), h('nav', { class: 'crumbs' }, h('span', null, '/'), h('span', { class: 'current' }, data.project.name)), h('span', { class: 'grow' }), themeToggle(), h('span', { class: 'share-badge' }, 'Только просмотр'), h('a', { class: 'btn small', href: '/register' }, 'Создать свой')),
+      h('header', { class: 'topbar' }, logoEl(), h('nav', { class: 'crumbs' }, h('span', null, '/'), h('span', { class: 'current' }, data.project.name)), h('span', { class: 'grow' }), themeToggle(), h('span', { class: 'share-badge' }, 'Только просмотр'), h('a', { class: 'btn small', href: '/register?utm_source=shared_board&utm_medium=viral' }, 'Создать свой')),
       h('div', { class: 'project-head' }, h('h1', { style: 'font-size:22px;margin:0' }, data.project.name), h('span', { class: 'sub', style: 'margin-left:10px' }, data.project.workspace_name)),
       h('div', { class: 'board' }, data.columns.map(col)),
     );
@@ -1817,9 +1936,10 @@
     try {
       // экран может перерисоваться (обновился профиль), запрос при этом должен уйти один раз
       if (!verifyRuns.has(token)) verifyRuns.set(token, api.post('/api/auth/verify', { token }));
-      await verifyRuns.get(token);
+      const res = await verifyRuns.get(token);
       if (state.user) { state.user = { ...state.user, email_verified: true }; saveUser(); }
-      card.replaceChildren(h('h1', { style: 'font-size:20px;margin:0 0 8px' }, 'Почта подтверждена'), h('p', { class: 'sub' }, 'Спасибо! Можно продолжать работу.'), h('a', { class: 'btn', href: state.user ? '#/' : '#/login' }, state.user ? 'В кабинет' : 'Войти'));
+      if (res && res.bonus_days) cacheClear();
+      card.replaceChildren(h('h1', { style: 'font-size:20px;margin:0 0 8px' }, 'Почта подтверждена'), h('p', { class: 'sub' }, res && res.bonus_days ? `Спасибо! Тебе и другу, который пригласил, начислено ${res.bonus_days} дней тарифа «Команда».` : 'Спасибо! Можно продолжать работу.'), h('a', { class: 'btn', href: state.user ? '#/' : '#/login' }, state.user ? 'В кабинет' : 'Войти'));
     } catch (e) {
       card.replaceChildren(h('h1', { style: 'font-size:20px;margin:0 0 8px' }, 'Ссылка не сработала'), h('p', { class: 'sub' }, e.message), h('a', { class: 'btn', href: '#/' }, 'В кабинет'));
     }
@@ -1902,6 +2022,63 @@
 
   // ---------- профиль ----------
 
+
+  // ---------- пригласи друга ----------
+  function referralCard() {
+    const box = h('div', { class: 'prof-card ref-card' }, h('h2', null, 'Пригласи друга'), h('p', { class: 'sub', style: 'margin:0' }, 'Загрузка…'));
+    api.get('/api/me/referral').then((r) => {
+      const text = 'Веду задачи команды в tasqly: доска, сроки, учёт времени и чат в одном месте. Регистрируйся по моей ссылке, и мы оба получим 7 дней тарифа «Команда»';
+      const copy = h('button', { class: 'btn small', onclick: async () => {
+        try { await navigator.clipboard.writeText(r.link); toast('Ссылка скопирована'); } catch { prompt('Скопируй ссылку', r.link); }
+      } }, 'Скопировать ссылку');
+      const share = navigator.share ? h('button', { class: 'btn ghost small', onclick: () => navigator.share({ title: 'tasqly', text, url: r.link }).catch(() => {}) }, 'Поделиться') : null;
+      const tg = h('a', { class: 'btn ghost small', target: '_blank', rel: 'noopener', href: `https://t.me/share/url?url=${encodeURIComponent(r.link)}&text=${encodeURIComponent(text)}` }, 'Отправить в Telegram');
+      const wa = h('a', { class: 'btn ghost small', target: '_blank', rel: 'noopener', href: `https://wa.me/?text=${encodeURIComponent(text + ' ' + r.link)}` }, 'WhatsApp');
+      box.replaceChildren(
+        h('h2', null, 'Пригласи друга'),
+        h('p', { class: 'ref-lead' }, `Друг регистрируется по твоей ссылке и подтверждает почту. Вы оба получаете ${r.bonus_days} дней тарифа «Команда». Бонус начисляется за первых ${r.max} друзей.`),
+        h('div', { class: 'ref-link', title: r.link }, r.link.replace(/^https?:\/\//, '')),
+        h('div', { class: 'ref-actions' }, copy, share, tg, wa),
+        h('div', { class: 'ref-stats' },
+          h('div', null, h('b', null, String(r.invited)), h('span', null, 'зарегистрировались')),
+          h('div', null, h('b', null, String(r.rewarded)), h('span', null, 'подтвердили почту')),
+          h('div', null, h('b', null, String(r.earned_days)), h('span', null, 'дней бонуса у тебя'))));
+    }).catch((e) => box.replaceChildren(h('h2', null, 'Пригласи друга'), h('p', { class: 'sub' }, e.message)));
+    return box;
+  }
+
+  // ---------- рост сервиса (только для владельца tasqly) ----------
+  async function viewGrowth() {
+    document.title = 'Рост · tasqly';
+    render(topbar([{ label: 'Профиль', href: '#/profile' }, { label: 'Рост' }]), h('div', { class: 'container' }, h('div', { class: 'empty' }, 'Загрузка…')));
+    const g = await api.get('/api/admin/growth');
+    const t = g.totals;
+    const tile = (n, label) => h('div', { class: 'home-stat' }, h('b', null, String(n || 0)), h('span', null, label));
+    const max = Math.max(1, ...g.days.map((d) => d.n));
+    const byDay = new Map(g.days.map((d) => [d.day, d.n]));
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() + 5 * 3600000 - i * 86400000).toISOString().slice(0, 10);
+      days.push([d, byDay.get(d) || 0]);
+    }
+    render(
+      topbar([{ label: 'Профиль', href: '#/profile' }, { label: 'Рост' }]),
+      h('div', { class: 'container prof' },
+        h('h1', { style: 'margin:8px 0 16px' }, 'Рост tasqly'),
+        h('div', { class: 'home-stats' }, tile(t.users, 'всего аккаунтов'), tile(t.last7, 'за 7 дней'), tile(t.last30, 'за 30 дней'), tile(t.verified, 'подтвердили почту'), tile(t.active7, 'работали с задачами за неделю'), tile(t.on_trial, 'сейчас на «Команде»'), tile(t.referred, 'пришли по приглашению'), tile(t.workspaces, 'пространств')),
+        h('div', { class: 'prof-card' }, h('h2', null, 'Регистрации за 30 дней'),
+          h('div', { class: 'gr-bars', role: 'img', 'aria-label': 'Регистрации по дням' }, days.map(([d, n]) => h('div', { class: 'gr-bar', title: `${formatDate(d)}: ${n}` }, h('i', { style: `height:${Math.round((n / max) * 100)}%` })))),
+          h('div', { class: 'gr-axis' }, h('span', null, formatDate(days[0][0])), h('span', null, 'сегодня'))),
+        h('div', { class: 'prof-card' }, h('h2', null, 'Откуда приходят (90 дней)'),
+          g.sources.length ? h('table', { class: 'gr-table' },
+            h('thead', null, h('tr', null, h('th', null, 'Источник'), h('th', null, 'Регистраций'), h('th', null, 'Подтвердили'))),
+            h('tbody', null, g.sources.map((s) => h('tr', null, h('td', null, s.source), h('td', null, String(s.n)), h('td', null, String(s.verified)))))) : h('p', { class: 'sub' }, 'Пока пусто'),
+          h('p', { class: 'sub', style: 'margin:12px 0 0' }, 'Чтобы видеть рекламу отдельной строкой, добавляй к ссылке метку: /register?utm_source=instagram')),
+        h('div', { class: 'prof-card' }, h('h2', null, 'Кто больше всех приглашает'),
+          g.referrers.length ? h('table', { class: 'gr-table' }, h('tbody', null, g.referrers.map((r) => h('tr', null, h('td', null, r.name), h('td', null, String(r.n)))))) : h('p', { class: 'sub' }, 'Пока никто'))),
+    );
+  }
+
   async function viewProfile() {
     document.title = 'Профиль · tasqly';
     render(topbar([{ label: 'Пространства', href: '#/' }, { label: 'Профиль' }]), h('div', { class: 'container' }, h('div', { class: 'empty' }, 'Загрузка…')));
@@ -1967,6 +2144,8 @@
           return h('div', { class: 'prof-card' }, h('h2', null, 'Тариф'),
             row(t && t.active ? 'Пробный период «Команда»' : 'Старт', t ? (t.active ? `Осталось ${daysWord(t.left)}. Все возможности открыты.` : 'Пробный период закончился. Оплата пока не подключена, всё продолжает работать.') : 'Бесплатно, до 3 человек в пространстве. Можно попробовать «Команду» 5 дней.', t ? cmp : startBtn));
         })(),
+        referralCard(),
+        user.staff ? h('div', { class: 'prof-card' }, h('h2', null, 'Для владельца сервиса'), row('Рост tasqly', 'Регистрации, источники и приглашения', h('a', { class: 'btn ghost small', href: '#/growth' }, 'Открыть'))) : null,
         h('div', { class: 'prof-card' },
           h('h2', null, 'AI на сегодня'),
           h('div', { class: 'prof-ai' }, h('b', null, `${usage.ai_used} из ${usage.ai_limit}`), h('span', null, 'запросов использовано, счётчик обнуляется каждый день')),
@@ -4174,7 +4353,7 @@
         if (state.user) return location.replace(PANEL);
         return viewAuth(path === '/login' ? 'login' : 'register');
       }
-      if (['/pricing', '/contacts', '/privacy', '/terms', '/changelog', '/status'].includes(path)) return viewPublicPage(path.slice(1));
+      if (['/pricing', '/contacts', '/privacy', '/terms', '/changelog', '/status'].includes(path) || SEO_PAGES[path.slice(1)]) return viewPublicPage(path.slice(1));
       return viewLanding();
     }
     const shareHash = hash.match(/^#\/share\/([0-9a-f]{32})$/);
@@ -4211,6 +4390,9 @@
     if (hash === '#/login' || hash === '#/register') {
       location.hash = '#/';
       return;
+    }
+    if (hash === '#/growth') {
+      try { return await viewGrowth(); } catch (e) { return render(topbar([{ label: 'Рост' }]), h('div', { class: 'container' }, h('div', { class: 'card empty' }, e.message))); }
     }
     if (hash === '#/profile') {
       try { return await viewProfile(); } catch (e) { return render(topbar([{ label: 'Ошибка' }]), h('div', { class: 'container' }, h('div', { class: 'card empty' }, e.message))); }

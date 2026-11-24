@@ -4,6 +4,10 @@
   <url><loc>https://tasqly.wsmp.workers.dev/pricing/</loc><priority>0.8</priority></url>
   <url><loc>https://tasqly.wsmp.workers.dev/contacts/</loc><priority>0.5</priority></url>
   <url><loc>https://tasqly.wsmp.workers.dev/changelog/</loc><priority>0.4</priority></url>
+  <url><loc>https://tasqly.wsmp.workers.dev/task-tracker/</loc><priority>0.7</priority></url>
+  <url><loc>https://tasqly.wsmp.workers.dev/uchet-vremeni/</loc><priority>0.6</priority></url>
+  <url><loc>https://tasqly.wsmp.workers.dev/perehod-s-trello/</loc><priority>0.6</priority></url>
+  <url><loc>https://tasqly.wsmp.workers.dev/perehod-s-clickup/</loc><priority>0.6</priority></url>
   <url><loc>https://tasqly.wsmp.workers.dev/register/</loc><priority>0.6</priority></url>
   <url><loc>https://tasqly.wsmp.workers.dev/privacy/</loc><priority>0.2</priority></url>
   <url><loc>https://tasqly.wsmp.workers.dev/terms/</loc><priority>0.2</priority></url>

@@ -396,14 +396,16 @@ route(
 
     const { hash, salt } = await hashPassword(password);
     const id = newId();
+    const source = body.source && typeof body.source === 'object' ? body.source : {};
+    const referredBy = await resolveReferrer(env, body.ref || source.ref);
     await env.DB.prepare(
-      'INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at, plan) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',
+      'INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at, plan, referred_by, signup_source) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)',
     )
-      .bind(id, email, name, hash, salt, now(), 'start')
+      .bind(id, email, name, hash, salt, now(), 'start', referredBy, cleanSource(source))
       .run();
 
     const { token, cookie } = await createSession(env, id);
-    const out = { user: shapeUser({ id, email, name, created_at: now(), trial_ends_at: null, plan: 'start' }), token };
+    const out = { user: shapeUser({ id, email, name, created_at: now(), trial_ends_at: null, plan: 'start' }), token, referred: !!referredBy };
     const vt = await sendVerification(env, req, { id, email, name });
     if (env.MAIL_MOCK && vt.token) out.debug_verify_token = vt.token;
     return json(out, 201, { 'set-cookie': cookie });
@@ -441,7 +443,7 @@ route(
   { auth: false },
 );
 
-route('GET', '/api/me', async ({ user }) => json({ user }));
+route('GET', '/api/me', async ({ env, user }) => json({ user: isStaff(env, user) ? { ...user, staff: true } : user }));
 
 // пробный период «Команды»: включается кнопкой, один раз на аккаунт
 route('POST', '/api/me/trial', async ({ env, user }) => {
@@ -629,7 +631,8 @@ route(
     if (!row || row.expires_at < now()) fail(400, 'ссылка недействительна или устарела, запроси новое письмо в кабинете');
     // ссылка остаётся рабочей до конца срока: повторное открытие или предпросмотр почтовиком её не ломают
     await env.DB.prepare('UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?').bind(now(), row.user_id).run();
-    return json({ ok: true });
+    const bonus = await rewardReferral(env, row.user_id);
+    return json({ ok: true, bonus_days: bonus ? REF_BONUS_DAYS : 0 });
   },
   { auth: false },
 );
@@ -732,7 +735,11 @@ route(
       state,
       prompt: 'select_account',
     });
-    return redirect(`https://accounts.google.com/o/oauth2/v2/auth?${q}`, [`${GSTATE}=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/google; Max-Age=600`]);
+    const cookies = [`${GSTATE}=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/google; Max-Age=600`];
+    // откуда пришёл человек: сохраняем до возврата от Google
+    const src = new URL(req.url).searchParams.get('src');
+    if (src && src.length < 900) cookies.push(`tq_gsrc=${encodeURIComponent(src)}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/google; Max-Age=600`);
+    return redirect(`https://accounts.google.com/o/oauth2/v2/auth?${q}`, cookies);
   },
   { auth: false },
 );
@@ -784,17 +791,112 @@ route(
         const id = newId();
         const { hash, salt } = await hashPassword(randomHex(24));
         const name = String(claims.name || email.split('@')[0]).slice(0, 60);
-        await env.DB.prepare('INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at, plan, email_verified_at, google_id) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)')
-          .bind(id, email, name, hash, salt, now(), 'start', now(), claims.sub)
+        let source = {};
+        try {
+          const m = /(?:^|;\s*)tq_gsrc=([^;]+)/.exec(req.headers.get('cookie') || '');
+          if (m) source = JSON.parse(decodeURIComponent(m[1])) || {};
+        } catch { /* метки повреждены, регистрируем без них */ }
+        const referredBy = await resolveReferrer(env, source.ref);
+        await env.DB.prepare('INSERT INTO users (id, email, name, pass_hash, pass_salt, created_at, trial_ends_at, plan, email_verified_at, google_id, referred_by, signup_source) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)')
+          .bind(id, email, name, hash, salt, now(), 'start', now(), claims.sub, referredBy, cleanSource(source))
           .run();
+        await rewardReferral(env, id);
         u = { id };
       }
     }
     const { cookie: session } = await createSession(env, u.id);
-    return redirect('/panel/', [session, clear]);
+    return redirect('/panel/', [session, clear, 'tq_gsrc=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/google; Max-Age=0']);
   },
   { auth: false },
 );
+
+
+// ---------- рост: источник регистрации и приглашения друзей ----------
+
+const DAY_MS = 24 * 3600 * 1000;
+const REF_BONUS_DAYS = 7;
+const REF_MAX = 12; // столько приглашений приносят бонус пригласившему
+
+function cleanSource(src) {
+  if (!src || typeof src !== 'object') return null;
+  const out = {};
+  for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'ref', 'landing', 'referrer']) {
+    if (typeof src[k] === 'string' && src[k].trim()) out[k] = src[k].trim().slice(0, 120);
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
+async function resolveReferrer(env, code) {
+  if (typeof code !== 'string' || !/^[a-z0-9]{6,12}$/.test(code)) return null;
+  const r = await env.DB.prepare('SELECT id FROM users WHERE ref_code = ?').bind(code).first();
+  return r ? r.id : null;
+}
+
+// бонус добавляется к концу пробного периода; если пробный не начинался, его 5 дней не сгорают
+const bonusEnd = (trialEnd) => (trialEnd ? Math.max(now(), trialEnd) : now() + TRIAL_DAYS * DAY_MS) + REF_BONUS_DAYS * DAY_MS;
+
+// начисляем один раз, когда приглашённый подтвердил почту
+async function rewardReferral(env, userId) {
+  const u = await env.DB.prepare('SELECT id, referred_by, ref_rewarded, trial_ends_at, email_verified_at FROM users WHERE id = ?').bind(userId).first();
+  if (!u || !u.referred_by || u.ref_rewarded || !u.email_verified_at) return false;
+  const mark = await env.DB.prepare('UPDATE users SET ref_rewarded = 1 WHERE id = ? AND ref_rewarded = 0').bind(u.id).run();
+  if (!mark.meta || !mark.meta.changes) return false;
+  const stmts = [env.DB.prepare('UPDATE users SET trial_ends_at = ? WHERE id = ?').bind(bonusEnd(u.trial_ends_at), u.id)];
+  const ref = await env.DB.prepare('SELECT id, trial_ends_at, (SELECT COUNT(*) FROM users WHERE referred_by = ?1 AND ref_rewarded = 1) AS n FROM users WHERE id = ?1').bind(u.referred_by).first();
+  if (ref && ref.n <= REF_MAX) stmts.push(env.DB.prepare('UPDATE users SET trial_ends_at = ? WHERE id = ?').bind(bonusEnd(ref.trial_ends_at), ref.id));
+  await env.DB.batch(stmts);
+  return true;
+}
+
+route('GET', '/api/me/referral', async ({ env, req, user }) => {
+  let row = await env.DB.prepare('SELECT ref_code FROM users WHERE id = ?').bind(user.id).first();
+  let code = row && row.ref_code;
+  for (let i = 0; !code && i < 5; i++) {
+    const c = randomHex(4);
+    try {
+      const r = await env.DB.prepare('UPDATE users SET ref_code = ? WHERE id = ? AND ref_code IS NULL').bind(c, user.id).run();
+      if (r.meta && r.meta.changes) code = c;
+      else code = (await env.DB.prepare('SELECT ref_code FROM users WHERE id = ?').bind(user.id).first()).ref_code;
+    } catch { /* такой код уже есть, пробуем другой */ }
+  }
+  if (!code) fail(500, 'не получилось создать ссылку, попробуй ещё раз');
+  const stats = await env.DB.prepare('SELECT COUNT(*) AS invited, COALESCE(SUM(ref_rewarded), 0) AS rewarded FROM users WHERE referred_by = ?').bind(user.id).first();
+  return json({
+    code,
+    link: `${appUrl(env, req)}/register?ref=${code}`,
+    invited: stats.invited,
+    rewarded: stats.rewarded,
+    bonus_days: REF_BONUS_DAYS,
+    max: REF_MAX,
+    earned_days: Math.min(stats.rewarded, REF_MAX) * REF_BONUS_DAYS,
+  });
+});
+
+// статистика роста для владельца сервиса (почты задаются переменной ADMIN_EMAILS через запятую)
+const isStaff = (env, user) => !!user && String(env.ADMIN_EMAILS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean).includes(user.email);
+
+route('GET', '/api/admin/growth', async ({ env, user }) => {
+  if (!isStaff(env, user)) fail(404, 'не найдено');
+  const t = now();
+  const one = (sql, ...a) => env.DB.prepare(sql).bind(...a).first();
+  const [totals, days, sources, top] = await Promise.all([
+    one(`SELECT COUNT(*) AS users,
+          SUM(CASE WHEN email_verified_at IS NOT NULL THEN 1 ELSE 0 END) AS verified,
+          SUM(CASE WHEN created_at > ?1 THEN 1 ELSE 0 END) AS last7,
+          SUM(CASE WHEN created_at > ?2 THEN 1 ELSE 0 END) AS last30,
+          SUM(CASE WHEN referred_by IS NOT NULL THEN 1 ELSE 0 END) AS referred,
+          SUM(CASE WHEN trial_ends_at > ?3 THEN 1 ELSE 0 END) AS on_trial,
+          (SELECT COUNT(*) FROM workspaces) AS workspaces,
+          (SELECT COUNT(DISTINCT user_id) FROM task_events WHERE created_at > ?1) AS active7
+        FROM users`, t - 7 * DAY_MS, t - 30 * DAY_MS, t),
+    env.DB.prepare(`SELECT date((created_at / 1000) + 18000, 'unixepoch') AS day, COUNT(*) AS n FROM users WHERE created_at > ? GROUP BY day ORDER BY day`).bind(t - 30 * DAY_MS).all(),
+    env.DB.prepare(`SELECT COALESCE(NULLIF(json_extract(signup_source, '$.utm_source'), ''), CASE WHEN referred_by IS NOT NULL THEN 'приглашение друга' END, NULLIF(json_extract(signup_source, '$.referrer'), ''), 'напрямую') AS source,
+          COUNT(*) AS n, SUM(CASE WHEN email_verified_at IS NOT NULL THEN 1 ELSE 0 END) AS verified
+        FROM users WHERE created_at > ? GROUP BY source ORDER BY n DESC LIMIT 20`).bind(t - 90 * DAY_MS).all(),
+    env.DB.prepare(`SELECT u.name, COUNT(r.id) AS n FROM users r JOIN users u ON u.id = r.referred_by GROUP BY u.id ORDER BY n DESC LIMIT 10`).all(),
+  ]);
+  return json({ totals, days: days.results, sources: sources.results, referrers: top.results });
+});
 
 // ---------- статус сервиса ----------
 

@@ -13,8 +13,14 @@ CREATE TABLE IF NOT EXISTS users (
   google_id TEXT, -- вход через Google
   notify_assigned INTEGER NOT NULL DEFAULT 1, -- письма: назначили задачу
   notify_mentioned INTEGER NOT NULL DEFAULT 1, -- письма: упомянули в комментарии
-  notify_due INTEGER NOT NULL DEFAULT 1 -- письма: срок сегодня или завтра
+  notify_due INTEGER NOT NULL DEFAULT 1, -- письма: срок сегодня или завтра
+  ref_code TEXT, -- код личной ссылки-приглашения
+  referred_by TEXT REFERENCES users(id) ON DELETE SET NULL, -- кто пригласил
+  ref_rewarded INTEGER NOT NULL DEFAULT 0, -- бонус за приглашение уже начислен
+  signup_source TEXT -- откуда пришёл: utm-метки, страница входа (json)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ref_code ON users(ref_code);
+CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_id) WHERE google_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
