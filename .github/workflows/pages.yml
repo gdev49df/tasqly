@@ -29,6 +29,7 @@ jobs:
       - name: собрать статику
         run: |
           mkdir _site
+          echo tasqly.gdev.uk > _site/CNAME
           cat > _site/index.html <<'EOF'
           <!doctype html>
           <meta charset="utf-8">
